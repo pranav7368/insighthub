@@ -51,6 +51,10 @@ from .members import (
 from .billing import BillingError, QuotaError, check_quota, entitlements, set_plan
 from . import billing_stripe
 from .core import config, db, passwords
+from .core.datarights import (
+    DataRightsError, as_download, erase_member, erase_workspace,
+    export_member, export_workspace,
+)
 from .core import ratelimit
 from .core.security import create_access_token, hash_password, new_id, verify_password
 from .ingest.append import append_to_dataset, list_batches, rollback_batch
@@ -236,6 +240,92 @@ def login(body: LoginBody):
     con.execute("UPDATE users SET failed_logins = 0, locked_until = NULL WHERE user_id = ?", [user_id])
     token = create_access_token(user_id, workspace_id, role, int(epoch or 0))
     return {"access_token": token, "workspace_id": workspace_id, "role": role}
+
+
+# ------------------------------------------------- data subject rights ----
+# GDPR Arts. 15/17/20 and the DPDP equivalents. Admin-only: producing or
+# erasing personal data is itself a privileged act, and the audit log records
+# every one of them.
+
+@app.get("/api/privacy/export/me")
+def export_my_data(principal: Principal = Depends(get_principal)):
+    """Anyone may export their own record — the right of access does not
+    depend on being an admin."""
+    con = db.connect()
+    try:
+        payload = export_member(con, principal.workspace_id, principal.user_id)
+    except DataRightsError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "export_self", principal.user_id)
+    return Response(content=as_download(payload), media_type="application/json",
+                    headers={"Content-Disposition": 'attachment; filename="my-data.json"'})
+
+
+@app.get("/api/privacy/export/member/{user_id}")
+def export_member_data(user_id: str, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    try:
+        payload = export_member(con, principal.workspace_id, user_id)
+    except DataRightsError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "export_member", user_id)
+    return Response(content=as_download(payload), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="member-{user_id}.json"'})
+
+
+@app.get("/api/privacy/export/workspace")
+def export_workspace_data(principal: Principal = Depends(require_admin)):
+    """Everything the workspace holds — the processor-side answer to
+    'give us our data back'."""
+    con = db.connect()
+    payload = export_workspace(con, principal.workspace_id)
+    db.audit(con, principal.workspace_id, principal.user_id, "export_workspace",
+             principal.workspace_id)
+    return Response(content=as_download(payload), media_type="application/json",
+                    headers={"Content-Disposition": 'attachment; filename="workspace-export.json"'})
+
+
+@app.delete("/api/privacy/member/{user_id}")
+def erase_member_data(user_id: str, principal: Principal = Depends(require_admin)):
+    """Erase a member. Their audit trail is de-identified, not deleted —
+    destroying the security record is neither required nor wise."""
+    if user_id == principal.user_id:
+        raise HTTPException(status_code=400,
+                            detail="you cannot erase your own admin account; transfer ownership first")
+    con = db.connect()
+    try:
+        result = erase_member(con, principal.workspace_id, user_id)
+    except DataRightsError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "erase_member", user_id)
+    return result
+
+
+class EraseWorkspaceBody(BaseModel):
+    # typing the name is the confirmation step; this is irreversible
+    confirm_workspace_name: str
+
+
+@app.post("/api/privacy/erase-workspace")
+def erase_workspace_data(body: EraseWorkspaceBody, principal: Principal = Depends(require_admin)):
+    """Irreversibly erase this workspace and all of its data, including the
+    physical dataset tables. Requires typing the workspace name back."""
+    con = db.connect()
+    row = con.execute("SELECT name FROM workspaces WHERE workspace_id = ?",
+                      [principal.workspace_id]).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    if body.confirm_workspace_name.strip() != row[0]:
+        raise HTTPException(status_code=400,
+                            detail="type the workspace name exactly to confirm erasure")
+    # audit BEFORE erasing — the entry is inside the workspace being removed,
+    # so this is a record for the operator's own log shipping, not for the row
+    db.audit(con, principal.workspace_id, principal.user_id, "erase_workspace",
+             principal.workspace_id)
+    try:
+        return erase_workspace(con, principal.workspace_id)
+    except DataRightsError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/auth/revoke-sessions")
