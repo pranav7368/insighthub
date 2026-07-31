@@ -9,28 +9,30 @@ malicious column name can never reach SQL.
 
 from ..core.sqlsafe import safe_identifier, safe_table_name
 from .engine import DatasetNotFound, get_columns, get_dataset
+from .rls import secured_relation
 
 
 class QualityError(Exception):
     pass
 
 
-def compute_quality(con, workspace_id: str, dataset_id: str) -> dict:
+def compute_quality(con, workspace_id: str, dataset_id: str, user_id: str | None = None) -> dict:
     dataset = get_dataset(con, workspace_id, dataset_id)
     if dataset["kind"] != "structured":
         raise DatasetNotFound(f"{dataset_id} is not a structured dataset")
     columns = get_columns(con, workspace_id, dataset_id)
     allowed = {c.name for c in columns}
-    table = safe_table_name(dataset["table_name"])
+    # the report describes the rows this member can actually see
+    table, rp = secured_relation(con, workspace_id, user_id, dataset)
 
-    row_count = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
-    distinct_rows = con.execute(f"SELECT count(*) FROM (SELECT DISTINCT * FROM {table})").fetchone()[0]
+    row_count = con.execute(f"SELECT count(*) FROM {table}", list(rp)).fetchone()[0]
+    distinct_rows = con.execute(f"SELECT count(*) FROM (SELECT DISTINCT * FROM {table})", list(rp)).fetchone()[0]
     duplicate_rows = row_count - distinct_rows
 
     col_reports, total_missing = [], 0
     for c in columns:
         col = safe_identifier(c.name, allowed)
-        non_null = con.execute(f"SELECT count({col}) FROM {table}").fetchone()[0]
+        non_null = con.execute(f"SELECT count({col}) FROM {table}", list(rp)).fetchone()[0]
         missing = row_count - non_null
         total_missing += missing
         rep = {
@@ -39,7 +41,8 @@ def compute_quality(con, workspace_id: str, dataset_id: str) -> dict:
         }
         if c.role == "measure":
             q = con.execute(
-                f"SELECT quantile_cont({col},0.25), quantile_cont({col},0.75) FROM {table} WHERE {col} IS NOT NULL"
+                f"SELECT quantile_cont({col},0.25), quantile_cont({col},0.75) FROM {table} WHERE {col} IS NOT NULL",
+                list(rp),
             ).fetchone()
             if q and q[0] is not None:
                 q1, q3 = q
@@ -47,12 +50,14 @@ def compute_quality(con, workspace_id: str, dataset_id: str) -> dict:
                 if iqr > 0:
                     lo, hi = q1 - 1.5 * iqr, q3 + 1.5 * iqr
                     rep["outlier_count"] = con.execute(
-                        f"SELECT count(*) FROM {table} WHERE {col} < ? OR {col} > ?", [lo, hi]
+                        f"SELECT count(*) FROM {table} WHERE {col} < ? OR {col} > ?",
+                        list(rp) + [lo, hi],
                     ).fetchone()[0]
         elif c.role in ("dimension", "ignored"):
             frac = con.execute(
                 f"SELECT avg(CASE WHEN TRY_CAST({col} AS DOUBLE) IS NOT NULL THEN 1.0 ELSE 0.0 END) "
-                f"FROM {table} WHERE {col} IS NOT NULL"
+                f"FROM {table} WHERE {col} IS NOT NULL",
+                list(rp),
             ).fetchone()[0]
             if frac is not None and 0.1 <= frac <= 0.9:
                 rep["mixed_format"] = True

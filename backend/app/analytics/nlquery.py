@@ -52,19 +52,22 @@ class QueryIntent:
 
 # ---------------------------------------------------------- schema -------
 
-def build_schema(con, workspace_id: str, dataset_id: str) -> dict:
+def build_schema(con, workspace_id: str, dataset_id: str, user_id: str | None = None) -> dict:
+    from .rls import secured_relation
+
     dataset = get_dataset(con, workspace_id, dataset_id)
     if dataset["kind"] != "structured":
         raise DatasetNotFound(f"{dataset_id} is not a structured dataset")
     columns = get_columns(con, workspace_id, dataset_id)
-    table = safe_table_name(dataset["table_name"])
+    table, rls_params = secured_relation(con, workspace_id, user_id, dataset)
     measures = [{"name": c.name, "subtype": c.subtype} for c in columns if c.role == "measure"]
     dimensions = []
     for c in columns:
         if c.role == "dimension":
             vals = con.execute(
                 f"SELECT DISTINCT {safe_identifier(c.name, {c.name})} FROM {table} "
-                f"WHERE {safe_identifier(c.name, {c.name})} IS NOT NULL LIMIT 50"
+                f"WHERE {safe_identifier(c.name, {c.name})} IS NOT NULL LIMIT 50",
+                list(rls_params),
             ).fetchall()
             dimensions.append({"name": c.name, "values": [v[0] for v in vals]})
     date_cols = [c.name for c in columns if c.role == "date"]
@@ -148,10 +151,17 @@ def _display_sql(sql: str, table_quoted: str, dataset_name: str, params: list) -
     return disp
 
 
-def execute_intent(con, workspace_id: str, dataset_id: str, intent: QueryIntent) -> dict:
-    schema = build_schema(con, workspace_id, dataset_id)
+def execute_intent(con, workspace_id: str, dataset_id: str, intent: QueryIntent,
+                   user_id: str | None = None) -> dict:
+    from .rls import secured_relation
+
+    schema = build_schema(con, workspace_id, dataset_id, user_id)
     allowed = schema["allowed"]
-    table = safe_table_name(schema["table"])
+    # display only: swapped for the friendly dataset name in the shown SQL, so
+    # the row filter stays visible. Never used as a FROM.  rls-raw-table-ok
+    physical = safe_table_name(schema["table"])
+    table, rls_params = secured_relation(
+        con, workspace_id, user_id, {"table_name": schema["table"], "dataset_id": dataset_id})
     dataset_name = schema["dataset_name"]
     date_col = schema["date_column"]
     subtype = next((m["subtype"] for m in schema["measures"] if m["name"] == intent.metric), None)
@@ -165,7 +175,7 @@ def execute_intent(con, workspace_id: str, dataset_id: str, intent: QueryIntent)
         value_expr = f"{intent.aggregation.upper()}({safe_identifier(intent.metric, allowed)})"
 
     # filters (values are always bound parameters)
-    where, params = [], []
+    where, params = [], list(rls_params)   # RLS binds first (subquery precedes WHERE)
     for col, val in intent.filters.items():
         where.append(f"{safe_identifier(col, allowed)} = ?")
         params.append(val)
@@ -183,7 +193,7 @@ def execute_intent(con, workspace_id: str, dataset_id: str, intent: QueryIntent)
         data = [{"label": r[0], "value": r[1]} for r in rows]
         return {"kind": "series", "x": "month", "data": data, "subtype": subtype,
                 "chart_type": intent.chart_type, "query": readable, "intent": intent.as_dict(),
-                "sql": _display_sql(sql, table, dataset_name, params)}
+                "sql": _display_sql(sql, physical, dataset_name, params)}
 
     if intent.group_by and intent.group_by in allowed:
         gcol = safe_identifier(intent.group_by, allowed)
@@ -196,14 +206,14 @@ def execute_intent(con, workspace_id: str, dataset_id: str, intent: QueryIntent)
         data = [{"label": r[0], "value": r[1]} for r in rows]
         return {"kind": "grouped", "x": intent.group_by, "data": data, "subtype": subtype,
                 "chart_type": intent.chart_type, "query": readable, "intent": intent.as_dict(),
-                "sql": _display_sql(sql, table, dataset_name, params)}
+                "sql": _display_sql(sql, physical, dataset_name, params)}
 
     # scalar (KPI)
     sql = f"SELECT {value_expr} AS v FROM {table} {where_sql}"
     value = con.execute(sql, params).fetchone()[0]
     return {"kind": "scalar", "value": value, "subtype": subtype,
             "chart_type": "kpi", "query": readable, "intent": intent.as_dict(),
-            "sql": _display_sql(sql, table, dataset_name, params)}
+            "sql": _display_sql(sql, physical, dataset_name, params)}
 
 
 def _describe(intent: QueryIntent, schema: dict) -> str:
@@ -258,10 +268,10 @@ def summarize(result: dict, intent: QueryIntent) -> str:
 
 
 def answer_data_question(con, workspace_id: str, dataset_id: str, question: str,
-                         llm: LLM | None = None) -> dict:
-    schema = build_schema(con, workspace_id, dataset_id)
+                         llm: LLM | None = None, user_id: str | None = None) -> dict:
+    schema = build_schema(con, workspace_id, dataset_id, user_id)
     intent = question_to_intent(question, schema, llm=llm)
-    result = execute_intent(con, workspace_id, dataset_id, intent)
+    result = execute_intent(con, workspace_id, dataset_id, intent, user_id)
     result["answer"] = summarize(result, intent)
     result["question"] = question
     return result

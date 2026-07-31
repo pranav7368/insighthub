@@ -33,6 +33,9 @@ from .analytics.semantic import (
     MetricError, create_metric, delete_metric, list_metrics,
 )
 from .analytics.drivers import DriverError, explain_change
+from .analytics.rls import (
+    RuleError, RuleNotFound, create_rule, delete_rule, list_rules, secured_relation,
+)
 from .analytics.joins import (
     JoinError, RelationNotFound, create_join, delete_relation, list_relations,
     rebuild_join, suggest_join_keys,
@@ -446,9 +449,9 @@ def export_csv(dataset_id: str, principal: Principal = Depends(get_principal)):
         raise HTTPException(status_code=400, detail="only spreadsheet datasets can be exported")
     cols = [c.name for c in get_columns(con, principal.workspace_id, dataset_id)]
     allowed = set(cols)
-    tq = safe_table_name(dataset["table_name"])
+    tq, rls_params = secured_relation(con, principal.workspace_id, principal.user_id, dataset)
     select = ", ".join(safe_identifier(c, allowed) for c in cols)
-    csv_text = con.execute(f"SELECT {select} FROM {tq}").df().to_csv(index=False)
+    csv_text = con.execute(f"SELECT {select} FROM {tq}", list(rls_params)).df().to_csv(index=False)
     safe_name = "".join(ch for ch in (dataset["name"] or "dataset") if ch.isalnum() or ch in " -_")[:60].strip() or "dataset"
     return Response(
         content=csv_text, media_type="text/csv",
@@ -660,7 +663,7 @@ def public_dashboard(token: str):
     The token is the only credential; it names exactly one dataset."""
     con = db.connect()
     try:
-        workspace_id, dataset_id, cfg = resolve_share_dashboard_config(con, token)
+        workspace_id, dataset_id, cfg, author_id = resolve_share_dashboard_config(con, token)
     except ShareNotFound:
         raise HTTPException(status_code=404, detail="this link is invalid or has expired")
     try:
@@ -669,6 +672,7 @@ def public_dashboard(token: str):
             filters=(cfg.get("filters") or None),
             date_from=cfg.get("date_from"), date_to=cfg.get("date_to"),
             breakdown_measure=cfg.get("measure"),
+            user_id=author_id,          # a link shows only what its author could see
         )
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="this dashboard is no longer available")
@@ -701,7 +705,8 @@ def add_alert(dataset_id: str, body: AlertCreateBody, principal: Principal = Dep
     try:
         check_quota(con, principal.workspace_id, "alerts")
         alert = create_alert(con, principal.workspace_id, dataset_id, body.name, body.measure,
-                             body.aggregate, body.op, body.threshold, body.webhook_url)
+                             body.aggregate, body.op, body.threshold, body.webhook_url,
+                             created_by=principal.user_id)
     except QuotaError as exc:
         raise HTTPException(status_code=402, detail=str(exc))
     except DatasetNotFound:
@@ -825,6 +830,7 @@ def explain(dataset_id: str, request: Request, principal: Principal = Depends(ge
             con, principal.workspace_id, dataset_id,
             measure=request.query_params.get("measure"),
             dimension=request.query_params.get("dimension"),
+            user_id=principal.user_id,
         )
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
@@ -844,7 +850,8 @@ class MetricCreateBody(BaseModel):
 @app.get("/api/datasets/{dataset_id}/metrics")
 def get_metrics(dataset_id: str, principal: Principal = Depends(get_principal)):
     con = db.connect()
-    return list_metrics(con, principal.workspace_id, dataset_id, with_values=True)
+    return list_metrics(con, principal.workspace_id, dataset_id, with_values=True,
+                        user_id=principal.user_id)
 
 
 @app.post("/api/datasets/{dataset_id}/metrics")
@@ -859,7 +866,8 @@ def add_metric(dataset_id: str, body: MetricCreateBody, principal: Principal = D
         raise HTTPException(status_code=400, detail=str(exc))
     db.audit(con, principal.workspace_id, principal.user_id, "metric_create", body.name)
     # return the metric with its computed value + SQL
-    return list_metrics(con, principal.workspace_id, dataset_id, with_values=True)
+    return list_metrics(con, principal.workspace_id, dataset_id, with_values=True,
+                        user_id=principal.user_id)
 
 
 @app.delete("/api/metrics/{metric_id}")
@@ -869,6 +877,46 @@ def remove_metric(metric_id: str, principal: Principal = Depends(require_editor)
     if not n:
         raise HTTPException(status_code=404, detail="metric not found")
     db.audit(con, principal.workspace_id, principal.user_id, "metric_delete", metric_id)
+    return {"ok": True}
+
+
+# ------------------------------------------------ row-level security -----
+
+class RuleBody(BaseModel):
+    user_id: str
+    column_name: str
+    values: list[str]
+    operator: str = "in"
+
+
+@app.get("/api/datasets/{dataset_id}/rls")
+def get_rls_rules(dataset_id: str, principal: Principal = Depends(require_admin)):
+    """Who is restricted to which rows on this dataset. Admin-only: the rules
+    are the access-control policy, so reading them is itself privileged."""
+    return list_rules(db.connect(), principal.workspace_id, dataset_id)
+
+
+@app.post("/api/datasets/{dataset_id}/rls")
+def add_rls_rule(dataset_id: str, body: RuleBody, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    try:
+        rule = create_rule(con, principal.workspace_id, dataset_id, body.user_id,
+                           body.column_name, body.values, body.operator)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except RuleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "rls_create",
+             f"{body.user_id}:{body.column_name}")
+    return rule
+
+
+@app.delete("/api/rls/{rule_id}")
+def remove_rls_rule(rule_id: str, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    if not delete_rule(con, principal.workspace_id, rule_id):
+        raise HTTPException(status_code=404, detail="rule not found")
+    db.audit(con, principal.workspace_id, principal.user_id, "rls_delete", rule_id)
     return {"ok": True}
 
 
@@ -921,6 +969,7 @@ def dashboard(dataset_id: str, request: Request, principal: Principal = Depends(
             filters=filters or None,
             date_from=query.get("date_from"), date_to=query.get("date_to"),
             breakdown_measure=query.get("measure"),
+            user_id=principal.user_id,
         )
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
@@ -950,7 +999,8 @@ def scatter(dataset_id: str, request: Request, principal: Principal = Depends(ge
     con = db.connect()
     try:
         return compute_scatter(con, principal.workspace_id, dataset_id, x, y,
-                               filters=query or None, date_from=date_from, date_to=date_to)
+                               filters=query or None, date_from=date_from, date_to=date_to,
+                               user_id=principal.user_id)
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
     except ValueError as exc:
@@ -961,7 +1011,7 @@ def scatter(dataset_id: str, request: Request, principal: Principal = Depends(ge
 def data_quality(dataset_id: str, principal: Principal = Depends(get_principal)):
     con = db.connect()
     try:
-        return compute_quality(con, principal.workspace_id, dataset_id)
+        return compute_quality(con, principal.workspace_id, dataset_id, principal.user_id)
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
 
@@ -995,7 +1045,8 @@ def query_data(dataset_id: str, body: DataQueryBody, principal: Principal = Depe
     numbers)."""
     con = db.connect()
     try:
-        result = answer_data_question(con, principal.workspace_id, dataset_id, body.question)
+        result = answer_data_question(con, principal.workspace_id, dataset_id, body.question,
+                                      user_id=principal.user_id)
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
     except QueryError as exc:

@@ -114,14 +114,21 @@ def compute_dashboard(
     date_from: str | None = None,
     date_to: str | None = None,
     breakdown_measure: str | None = None,
+    user_id: str | None = None,
 ) -> dict:
+    """`user_id` is the member the numbers are computed *for*: their row-level
+    rules narrow every query below. None means unrestricted — correct for
+    system callers, so endpoints must always pass the authenticated user."""
+    # local import: rls imports get_dataset/get_columns from this module
+    from .rls import secured_relation
+
     dataset = get_dataset(con, workspace_id, dataset_id)
     if dataset["kind"] != "structured":
         raise DatasetNotFound(f"{dataset_id} is not a structured dataset")
 
     columns = get_columns(con, workspace_id, dataset_id)
     allowed = {c.name for c in columns}                    # the injection whitelist
-    table = safe_table_name(dataset["table_name"])
+    table, rls_params = secured_relation(con, workspace_id, user_id, dataset)
 
     measures = [c for c in columns if c.role == "measure"]
     dimensions = [c for c in columns if c.role == "dimension"]
@@ -131,7 +138,11 @@ def compute_dashboard(
     from_ts, to_ts = _date_bounds(date_from, date_to)
 
     def build_where(extra_sql: str | None = None):
-        clauses, params = [], []
+        # The row-level filter lives in the relation subquery, which precedes
+        # any outer WHERE in the SQL text — so its params bind first. Seeding
+        # them here means every query built from build_where is restricted;
+        # there is no per-query step to forget.
+        clauses, params = [], list(rls_params)
         for column, value in (filters or {}).items():
             clauses.append(f"{safe_identifier(column, allowed)} = ?")
             params.append(value)
@@ -242,8 +253,11 @@ def compute_dashboard(
     filter_options = {}
     for dim in dimensions:
         dcol = safe_identifier(dim.name, allowed)
+        # the only query here not built from build_where — bind the RLS params
+        # explicitly, or a restricted user would see every value in the filter
         rows = con.execute(
-            f"SELECT DISTINCT {dcol} FROM {table} WHERE {dcol} IS NOT NULL ORDER BY 1 LIMIT 200"
+            f"SELECT DISTINCT {dcol} FROM {table} WHERE {dcol} IS NOT NULL ORDER BY 1 LIMIT 200",
+            list(rls_params),
         ).fetchall()
         filter_options[dim.name] = {"subtype": dim.subtype, "values": [r[0] for r in rows]}
 

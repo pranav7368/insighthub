@@ -173,6 +173,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     webhook_url   VARCHAR NOT NULL,
     enabled       BOOLEAN DEFAULT true,
     last_checked  TIMESTAMP,
+    created_by    VARCHAR,               -- whose row-level rules scope the evaluation
     last_value    DOUBLE,
     last_state    VARCHAR DEFAULT 'pending',  -- pending | ok | firing | error
     last_error    VARCHAR,
@@ -224,6 +225,38 @@ CREATE TABLE IF NOT EXISTS dataset_relations (
     right_key         VARCHAR NOT NULL,
     join_type         VARCHAR NOT NULL,   -- inner | left
     created_at        TIMESTAMP DEFAULT current_timestamp
+);
+
+-- Row-level security: which rows of a dataset a given MEMBER may see. Rules
+-- bind to a user (not a role), so "Priya sees only North & East" is expressible
+-- without inventing a role per territory. Rules on the same column OR together
+-- (a widening list); rules on different columns AND together (each narrows).
+--
+-- Enforcement is in analytics/rls.py, which rewrites the dataset's table
+-- reference into a filtered subquery every read path shares. A user with no
+-- rules sees everything -- absence of a rule is not a restriction.
+CREATE TABLE IF NOT EXISTS rls_rules (
+    rule_id        VARCHAR PRIMARY KEY,
+    workspace_id   VARCHAR NOT NULL,
+    dataset_id     VARCHAR NOT NULL,
+    user_id        VARCHAR NOT NULL,
+    column_name    VARCHAR NOT NULL,
+    operator       VARCHAR NOT NULL DEFAULT 'in',  -- in | not_in
+    allowed_values VARCHAR NOT NULL,               -- JSON array of strings
+    created_at     TIMESTAMP DEFAULT current_timestamp
+);
+
+-- PII policy per column. Detected at ingest (analytics/privacy.py) and
+-- overridable by an admin. A masked column is redacted on the way OUT for
+-- everyone except admins, so the underlying data is never rewritten and the
+-- policy can be relaxed later without a re-upload.
+CREATE TABLE IF NOT EXISTS column_policies (
+    dataset_id   VARCHAR NOT NULL,
+    workspace_id VARCHAR NOT NULL,
+    column_name  VARCHAR NOT NULL,
+    pii_kind     VARCHAR,                          -- email | phone | national_id | person_name
+    masked       BOOLEAN DEFAULT true,
+    PRIMARY KEY (dataset_id, column_name)
 );
 """
 
