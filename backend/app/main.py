@@ -50,7 +50,7 @@ from .members import (
 )
 from .billing import BillingError, QuotaError, check_quota, entitlements, set_plan
 from . import billing_stripe
-from .core import config, db, passwords
+from .core import config, db, observability, passwords
 from .core.datarights import (
     DataRightsError, as_download, erase_member, erase_workspace,
     export_member, export_workspace,
@@ -95,6 +95,38 @@ def _client_ip(request: Request) -> str:
         if xff:
             return xff.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
+
+
+@app.middleware("http")
+async def _observe(request: Request, call_next):
+    """One structured line per request, correlated by X-Request-Id.
+
+    A caller may supply the id (so a trace survives a proxy hop); otherwise one
+    is minted. It is echoed back on the response so a user can quote it.
+    """
+    request_id = request.headers.get("x-request-id") or observability.new_request_id()
+    token = observability.request_id_var.set(request_id)
+    timer = observability.Timer()
+    try:
+        with timer:
+            response = await call_next(request)
+    except Exception as exc:
+        observability.report_exception(
+            exc, method=request.method, path=request.url.path)
+        raise
+    finally:
+        observability.request_id_var.reset(token)
+
+    if request.url.path.startswith("/api/") and request.url.path not in ("/api/health", "/api/ready"):
+        observability.event(
+            "request",
+            method=request.method,
+            path=request.url.path,          # identifiers only — never query values
+            status=response.status_code,
+            duration_ms=timer.ms,
+        )
+    response.headers["X-Request-Id"] = request_id
+    return response
 
 
 @app.middleware("http")
