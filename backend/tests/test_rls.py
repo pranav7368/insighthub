@@ -133,7 +133,8 @@ def test_no_rules_means_unrestricted(con):
 
 def test_same_column_rules_widen_different_columns_narrow(con):
     con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO users VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer', now())")
+    con.execute("INSERT INTO users (user_id, workspace_id, email, password_hash, role) "
+                "VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
     create_rule(con, "ws_a", res.dataset_id, "usr_a", "region", ["North"])
     create_rule(con, "ws_a", res.dataset_id, "usr_a", "region", ["South"])
@@ -148,7 +149,8 @@ def test_same_column_rules_widen_different_columns_narrow(con):
 def test_broken_rule_fails_closed(con):
     """A rule naming a column the dataset no longer has must deny, not ignore."""
     con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO users VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer', now())")
+    con.execute("INSERT INTO users (user_id, workspace_id, email, password_hash, role) "
+                "VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
     create_rule(con, "ws_a", res.dataset_id, "usr_a", "region", ["North"])
     # simulate the column disappearing under the rule (re-upload with new headers)
@@ -162,7 +164,8 @@ def test_broken_rule_fails_closed(con):
 def test_rules_are_workspace_scoped(con):
     con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
     con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
-    con.execute("INSERT INTO users VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer', now())")
+    con.execute("INSERT INTO users (user_id, workspace_id, email, password_hash, role) "
+                "VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
     rule = create_rule(con, "ws_a", res.dataset_id, "usr_a", "region", ["North"])
 
@@ -173,7 +176,8 @@ def test_rules_are_workspace_scoped(con):
 
 def test_bad_operator_rejected(con):
     con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO users VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer', now())")
+    con.execute("INSERT INTO users (user_id, workspace_id, email, password_hash, role) "
+                "VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
     with pytest.raises(RuleError):
         create_rule(con, "ws_a", res.dataset_id, "usr_a", "region", ["North"], operator="drop")

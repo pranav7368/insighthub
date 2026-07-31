@@ -87,11 +87,14 @@ def test_delete_missing_member(ws):
 
 def test_change_password(ws):
     con, _, actor = ws
+    strong = "a quiet afternoon phrase"
     with pytest.raises(MemberError):
-        change_password(con, actor, "wrongpass", "newpass12")   # wrong current
-    assert change_password(con, actor, "origadmin1", "newpass12")["ok"] is True
+        change_password(con, actor, "wrongpass", strong)        # wrong current
+    assert change_password(con, actor, "origadmin1", strong)["ok"] is True
     with pytest.raises(MemberError):
-        change_password(con, actor, "newpass12", "short")       # too short
+        change_password(con, actor, strong, "short")            # too short
+    with pytest.raises(MemberError):
+        change_password(con, actor, strong, "password123")      # now policy-checked too
 
 
 # --------------------------------------------------------- isolation -------

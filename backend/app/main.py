@@ -6,6 +6,7 @@ another tenant's data by guessing an id.
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, UploadFile
@@ -49,7 +50,7 @@ from .members import (
 )
 from .billing import BillingError, QuotaError, check_quota, entitlements, set_plan
 from . import billing_stripe
-from .core import config, db
+from .core import config, db, passwords
 from .core import ratelimit
 from .core.security import create_access_token, hash_password, new_id, verify_password
 from .ingest.append import append_to_dataset, list_batches, rollback_batch
@@ -176,8 +177,10 @@ class LoginBody(BaseModel):
 
 @app.post("/api/auth/signup")
 def signup(body: SignupBody):
-    if len(body.password) < 8:
-        raise HTTPException(status_code=400, detail="password must be at least 8 characters")
+    try:
+        passwords.validate(body.password, email=body.email, workspace_name=body.workspace_name)
+    except passwords.WeakPassword as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     con = db.connect()
     exists = con.execute("SELECT 1 FROM users WHERE email = ?", [body.email]).fetchone()
     if exists:
@@ -190,20 +193,63 @@ def signup(body: SignupBody):
         [user_id, workspace_id, body.email, hash_password(body.password)],
     )
     db.audit(con, workspace_id, user_id, "signup", body.email)
-    token = create_access_token(user_id, workspace_id, "admin")
+    token = create_access_token(user_id, workspace_id, "admin", 0)
     return {"access_token": token, "workspace_id": workspace_id, "role": "admin"}
+
+
+# Online-guessing defence, per account. The per-IP limiter cannot see an
+# attack distributed across many addresses against one mailbox.
+MAX_FAILED_LOGINS = 8
+LOCKOUT_MINUTES = 15
 
 
 @app.post("/api/auth/login")
 def login(body: LoginBody):
     con = db.connect()
     row = con.execute(
-        "SELECT user_id, workspace_id, password_hash, role FROM users WHERE email = ?", [body.email]
+        """SELECT user_id, workspace_id, password_hash, role, token_epoch,
+                  failed_logins, locked_until
+           FROM users WHERE email = ?""",
+        [body.email],
     ).fetchone()
-    if row is None or not verify_password(body.password, row[2]):
-        raise HTTPException(status_code=401, detail="invalid email or password")
-    token = create_access_token(row[0], row[1], row[3])
-    return {"access_token": token, "workspace_id": row[1], "role": row[3]}
+
+    # One message and one code for every failure below, so the response never
+    # reveals whether an address is registered or a account is locked.
+    invalid = HTTPException(status_code=401, detail="invalid email or password")
+    if row is None:
+        raise invalid
+
+    user_id, workspace_id, password_hash, role, epoch, failed, locked_until = row
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if locked_until is not None and locked_until > now:
+        raise invalid
+
+    if not verify_password(body.password, password_hash):
+        failed = int(failed or 0) + 1
+        lock_to = now + timedelta(minutes=LOCKOUT_MINUTES) if failed >= MAX_FAILED_LOGINS else None
+        con.execute("UPDATE users SET failed_logins = ?, locked_until = ? WHERE user_id = ?",
+                    [failed, lock_to, user_id])
+        if lock_to is not None:
+            db.audit(con, workspace_id, user_id, "login_locked", body.email)
+        raise invalid
+
+    con.execute("UPDATE users SET failed_logins = 0, locked_until = NULL WHERE user_id = ?", [user_id])
+    token = create_access_token(user_id, workspace_id, role, int(epoch or 0))
+    return {"access_token": token, "workspace_id": workspace_id, "role": role}
+
+
+@app.post("/api/auth/revoke-sessions")
+def revoke_sessions(principal: Principal = Depends(get_principal)):
+    """Sign out everywhere. Invalidates every token issued to this account,
+    including the one making the request — the remedy for a laptop left on a
+    train, which a self-contained JWT otherwise has no answer for."""
+    con = db.connect()
+    con.execute(
+        "UPDATE users SET token_epoch = COALESCE(token_epoch, 0) + 1 WHERE user_id = ? AND workspace_id = ?",
+        [principal.user_id, principal.workspace_id],
+    )
+    db.audit(con, principal.workspace_id, principal.user_id, "revoke_sessions", principal.user_id)
+    return {"ok": True, "detail": "all sessions signed out — sign in again"}
 
 
 class ChangePasswordBody(BaseModel):

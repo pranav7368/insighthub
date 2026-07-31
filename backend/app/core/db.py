@@ -30,7 +30,14 @@ CREATE TABLE IF NOT EXISTS users (
     workspace_id  VARCHAR NOT NULL,
     email         VARCHAR NOT NULL UNIQUE,
     password_hash VARCHAR NOT NULL,
-    role          VARCHAR NOT NULL DEFAULT 'admin',   -- admin | viewer
+    role          VARCHAR NOT NULL DEFAULT 'admin',   -- admin | editor | viewer
+    -- session generation: bumping this invalidates every token issued earlier,
+    -- which is how a self-contained JWT gets revoked (see core/security.py)
+    token_epoch   INTEGER DEFAULT 0,
+    -- online-guessing defence, per ACCOUNT (the per-IP limiter cannot see a
+    -- distributed attack against one mailbox)
+    failed_logins INTEGER DEFAULT 0,
+    locked_until  TIMESTAMP,
     created_at    TIMESTAMP DEFAULT current_timestamp
 );
 

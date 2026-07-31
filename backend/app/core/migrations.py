@@ -95,6 +95,15 @@ MIGRATIONS: tuple[Migration, ...] = (
         # frontend falls back to the natural order. Nothing to alter.
         statements=(),
     ),
+    Migration(
+        id="0005_user_session_and_lockout",
+        description="revocable sessions (token_epoch) + per-account login lockout",
+        statements=(
+            _add_column("users", "token_epoch", "INTEGER DEFAULT 0"),
+            _add_column("users", "failed_logins", "INTEGER DEFAULT 0"),
+            _add_column("users", "locked_until", "TIMESTAMP"),
+        ),
+    ),
 )
 
 

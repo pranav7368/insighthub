@@ -26,7 +26,24 @@ def get_principal(authorization: str = Header(default="")) -> Principal:
         payload = decode_access_token(token)
     except TokenError as exc:
         raise HTTPException(status_code=401, detail=f"invalid token: {exc}")
-    return Principal(user_id=payload["sub"], workspace_id=payload["ws"], role=payload.get("role", "viewer"))
+
+    # The token proves identity; the database decides whether that identity is
+    # still valid and what it may do *now*. Without this a JWT cannot be taken
+    # back — a removed member keeps access until it expires — and a role change
+    # would not apply until the user happened to log in again.
+    from ..core import db
+
+    row = db.connect().execute(
+        "SELECT role, token_epoch FROM users WHERE user_id = ? AND workspace_id = ?",
+        [payload["sub"], payload["ws"]],
+    ).fetchone()
+    if row is None:
+        raise HTTPException(status_code=401, detail="account no longer exists")
+    role, epoch = row[0], int(row[1] or 0)
+    if int(payload.get("ep", 0)) != epoch:
+        raise HTTPException(status_code=401, detail="session has been revoked — sign in again")
+
+    return Principal(user_id=payload["sub"], workspace_id=payload["ws"], role=role)
 
 
 def require_admin(principal: Principal = Depends(get_principal)) -> Principal:
