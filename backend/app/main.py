@@ -50,7 +50,7 @@ from .members import (
 )
 from .billing import BillingError, QuotaError, check_quota, entitlements, set_plan
 from . import billing_stripe
-from .core import config, db, observability, passwords
+from .core import config, db, mfa, observability, passwords
 from .core.datarights import (
     DataRightsError, as_download, erase_member, erase_workspace,
     export_member, export_workspace,
@@ -209,6 +209,8 @@ class SignupBody(BaseModel):
 class LoginBody(BaseModel):
     email: EmailStr
     password: str
+    # supplied on the second attempt, once the client has been told mfa_required
+    mfa_code: str | None = None
 
 
 @app.post("/api/auth/signup")
@@ -269,9 +271,136 @@ def login(body: LoginBody):
             db.audit(con, workspace_id, user_id, "login_locked", body.email)
         raise invalid
 
+    # Password accepted. If a second factor is enrolled it must be satisfied
+    # before any token is issued.
+    mfa_row = con.execute(
+        "SELECT mfa_enabled, mfa_secret, mfa_last_step FROM users WHERE user_id = ?", [user_id]
+    ).fetchone()
+    if mfa_row and mfa_row[0] and mfa_row[1]:
+        if not body.mfa_code:
+            # 401 with a distinct code: the client must prompt for the code.
+            # This does confirm the password was right, which is inherent to
+            # any second-factor prompt — the factor is what still stops them.
+            raise HTTPException(status_code=401,
+                                detail="mfa_required: enter the code from your authenticator app")
+        try:
+            step = mfa.verify(mfa_row[1], body.mfa_code, last_used_step=mfa_row[2])
+            con.execute("UPDATE users SET mfa_last_step = ? WHERE user_id = ?", [step, user_id])
+        except mfa.CodeAlreadyUsed as exc:
+            # a correct-but-spent code is not a failed guess; do not count it
+            # towards lockout and do not pretend the password was wrong
+            raise HTTPException(status_code=401, detail=str(exc))
+        except mfa.MfaError:
+            if not _consume_recovery_code(con, workspace_id, user_id, body.mfa_code):
+                failed = int(failed or 0) + 1
+                con.execute("UPDATE users SET failed_logins = ? WHERE user_id = ?", [failed, user_id])
+                raise invalid
+            db.audit(con, workspace_id, user_id, "mfa_recovery_used", body.email)
+
     con.execute("UPDATE users SET failed_logins = 0, locked_until = NULL WHERE user_id = ?", [user_id])
     token = create_access_token(user_id, workspace_id, role, int(epoch or 0))
     return {"access_token": token, "workspace_id": workspace_id, "role": role}
+
+
+def _consume_recovery_code(con, workspace_id: str, user_id: str, supplied: str) -> bool:
+    """Spend a single-use recovery code. Deleting the row is what makes it
+    single-use, so a code cannot be replayed even moments later."""
+    for (code_hash,) in con.execute(
+        "SELECT code_hash FROM mfa_recovery_codes WHERE user_id = ? AND workspace_id = ?",
+        [user_id, workspace_id],
+    ).fetchall():
+        if mfa.recovery_matches(supplied, code_hash):
+            con.execute("DELETE FROM mfa_recovery_codes WHERE user_id = ? AND code_hash = ?",
+                        [user_id, code_hash])
+            return True
+    return False
+
+
+# ------------------------------------------------------ two-factor auth ---
+
+class MfaEnableBody(BaseModel):
+    code: str
+
+
+class MfaDisableBody(BaseModel):
+    password: str
+
+
+@app.post("/api/auth/mfa/setup")
+def mfa_setup(principal: Principal = Depends(get_principal)):
+    """Begin enrolment: mint a secret and return the otpauth:// URI.
+
+    The factor is NOT active yet — mfa_enabled stays false until a code proves
+    the app was configured, so a half-finished setup cannot lock anyone out.
+    """
+    con = db.connect()
+    row = con.execute("SELECT email, mfa_enabled FROM users WHERE user_id = ?",
+                      [principal.user_id]).fetchone()
+    if row and row[1]:
+        raise HTTPException(status_code=400, detail="two-factor authentication is already on")
+    secret = mfa.new_secret()
+    con.execute("UPDATE users SET mfa_secret = ? WHERE user_id = ?", [secret, principal.user_id])
+    return {"secret": secret, "otpauth_uri": mfa.provisioning_uri(secret, row[0]),
+            "detail": "scan or paste this into your authenticator app, then confirm with a code"}
+
+
+@app.post("/api/auth/mfa/enable")
+def mfa_enable(body: MfaEnableBody, principal: Principal = Depends(get_principal)):
+    """Confirm enrolment with a live code, then hand back the recovery codes.
+
+    They are shown exactly once — stored hashed, so we genuinely cannot show
+    them again."""
+    con = db.connect()
+    row = con.execute("SELECT mfa_secret, mfa_enabled FROM users WHERE user_id = ?",
+                      [principal.user_id]).fetchone()
+    if not row or not row[0]:
+        raise HTTPException(status_code=400, detail="start setup first")
+    if row[1]:
+        raise HTTPException(status_code=400, detail="two-factor authentication is already on")
+    try:
+        step = mfa.verify(row[0], body.code)
+    except mfa.MfaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    codes = mfa.new_recovery_codes()
+    con.execute("DELETE FROM mfa_recovery_codes WHERE user_id = ?", [principal.user_id])
+    con.executemany(
+        "INSERT INTO mfa_recovery_codes (user_id, workspace_id, code_hash) VALUES (?, ?, ?)",
+        [(principal.user_id, principal.workspace_id, mfa.hash_recovery_code(c)) for c in codes],
+    )
+    con.execute("UPDATE users SET mfa_enabled = true, mfa_last_step = ? WHERE user_id = ?",
+                [step, principal.user_id])
+    db.audit(con, principal.workspace_id, principal.user_id, "mfa_enabled", principal.user_id)
+    return {"enabled": True, "recovery_codes": codes,
+            "detail": "save these somewhere safe — they will not be shown again"}
+
+
+@app.post("/api/auth/mfa/disable")
+def mfa_disable(body: MfaDisableBody, principal: Principal = Depends(get_principal)):
+    """Turning the factor off requires the password — otherwise a stolen
+    session could quietly remove it."""
+    con = db.connect()
+    row = con.execute("SELECT password_hash FROM users WHERE user_id = ?",
+                      [principal.user_id]).fetchone()
+    if not row or not verify_password(body.password, row[0]):
+        raise HTTPException(status_code=401, detail="password is incorrect")
+    con.execute(
+        "UPDATE users SET mfa_enabled = false, mfa_secret = NULL, mfa_last_step = NULL "
+        "WHERE user_id = ?", [principal.user_id])
+    con.execute("DELETE FROM mfa_recovery_codes WHERE user_id = ?", [principal.user_id])
+    db.audit(con, principal.workspace_id, principal.user_id, "mfa_disabled", principal.user_id)
+    return {"enabled": False}
+
+
+@app.get("/api/auth/mfa")
+def mfa_status(principal: Principal = Depends(get_principal)):
+    con = db.connect()
+    row = con.execute("SELECT mfa_enabled FROM users WHERE user_id = ?",
+                      [principal.user_id]).fetchone()
+    remaining = con.execute(
+        "SELECT count(*) FROM mfa_recovery_codes WHERE user_id = ?", [principal.user_id]
+    ).fetchone()[0]
+    return {"enabled": bool(row and row[0]), "recovery_codes_remaining": remaining}
 
 
 # ------------------------------------------------- data subject rights ----

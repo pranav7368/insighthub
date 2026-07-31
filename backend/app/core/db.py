@@ -38,7 +38,22 @@ CREATE TABLE IF NOT EXISTS users (
     -- distributed attack against one mailbox)
     failed_logins INTEGER DEFAULT 0,
     locked_until  TIMESTAMP,
+    -- second factor (TOTP). mfa_secret exists once enrolment starts; only
+    -- mfa_enabled makes it required, so a half-finished setup cannot lock
+    -- anyone out. mfa_last_step blocks replay of a code inside its window.
+    mfa_secret    VARCHAR,
+    mfa_enabled   BOOLEAN DEFAULT false,
+    mfa_last_step BIGINT,
     created_at    TIMESTAMP DEFAULT current_timestamp
+);
+
+-- Single-use recovery codes, stored hashed like any other credential. The row
+-- is deleted on use, which is what makes them single-use.
+CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+    user_id      VARCHAR NOT NULL,
+    workspace_id VARCHAR NOT NULL,
+    code_hash    VARCHAR NOT NULL,
+    created_at   TIMESTAMP DEFAULT current_timestamp
 );
 
 CREATE TABLE IF NOT EXISTS datasets (

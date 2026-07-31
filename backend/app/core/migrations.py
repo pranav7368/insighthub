@@ -104,6 +104,21 @@ MIGRATIONS: tuple[Migration, ...] = (
             _add_column("users", "locked_until", "TIMESTAMP"),
         ),
     ),
+    Migration(
+        id="0006_mfa",
+        description="TOTP second factor + single-use recovery codes",
+        statements=(
+            _add_column("users", "mfa_secret", "VARCHAR"),
+            _add_column("users", "mfa_enabled", "BOOLEAN DEFAULT false"),
+            _add_column("users", "mfa_last_step", "BIGINT"),
+            """CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+                   user_id      VARCHAR NOT NULL,
+                   workspace_id VARCHAR NOT NULL,
+                   code_hash    VARCHAR NOT NULL,
+                   created_at   TIMESTAMP DEFAULT current_timestamp
+               )""",
+        ),
+    ),
 )
 
 

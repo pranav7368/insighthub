@@ -22,6 +22,7 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Password policy** | NIST SP 800-63B style: length, breach-corpus blocklist, no account-derived or sequential passwords | `core/passwords.py` |
 | **Session revocation** | `token_epoch` per user; bumped on password change, role change, and "sign out everywhere" | `core/security.py` |
 | **Login lockout** | Per account (not just per IP), 8 failures → 15 minutes; identical 401 for every failure so account existence is not disclosed | `main.py` |
+| **Two-factor auth** | TOTP (RFC 6238) on the standard library, verified against the RFC's own test vectors; replay of a code inside its window refused; single-use recovery codes stored hashed | `core/mfa.py` |
 | **Audit log** | Every privileged action recorded with actor, action and target | `core/db.py` |
 | **Data export / erasure** | Per member and per workspace; erasure drops physical dataset tables and verifies itself | `core/datarights.py` |
 | **SSRF defence** | Every outbound URL (connectors, alert webhooks) resolved and checked against private ranges | `core/nettrust.py` |
@@ -30,7 +31,7 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Structured logging** | JSON, request-correlated, credential-redacted; identifiers logged, never row contents | `core/observability.py` |
 | **Schema migrations** | Versioned ledger so a released build never meets a database it cannot read | `core/migrations.py` |
 
-Verified by **399 automated tests**, including a source-guard test that fails
+Verified by **426 automated tests**, including a source-guard test that fails
 if any module queries a dataset table without going through the row-level
 security rewrite.
 
@@ -127,8 +128,9 @@ short to improvise, so the runbook must exist before it is needed:
 Stated plainly, because a reviewer will find them anyway and finding them
 undisclosed is worse than finding them listed:
 
-* **No MFA.** Password plus lockout only.
 * **No SSO / SCIM.** No enterprise identity provider integration.
+* **MFA is not enforceable workspace-wide.** Members may enable it; an admin
+  cannot yet require it for everyone, which some questionnaires ask for.
 * **No automated retention or scheduled deletion** (§4).
 * **No SOC 2 report.** Controls exist; an audit and observation window do not.
 * **Encryption at rest is deployment-dependent** (§2), not enforced by the app.

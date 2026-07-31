@@ -73,7 +73,7 @@ InsightHub/
 │   │   ├── billing.py           # plans + quota (plan gating)
 │   │   ├── billing_stripe.py    # Stripe checkout + webhook
 │   │   └── members.py           # team members + roles (admin/editor/viewer)
-│   ├── tests/                   # 399 tests (pytest)
+│   ├── tests/                   # 426 tests (pytest)
 │   └── scripts/                 # sample data generator
 │
 └── frontend/                    # === FRONTEND (React / Vite) ===
@@ -188,7 +188,7 @@ cd backend
 Tests chalane ke liye:
 ```bash
 cd backend
-IH_OFFLINE=1 .venv/Scripts/python -m pytest -q      # 399 tests
+IH_OFFLINE=1 .venv/Scripts/python -m pytest -q      # 426 tests
 ```
 
 ---

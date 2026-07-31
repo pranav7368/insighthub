@@ -167,7 +167,7 @@ backend/
     analytics/              detect · engine · intelligence · correlation · quality · nlquery · narrative
     qa/                     llm (multi-provider + offline) · engine · gates
     prompts/                reviewable plain-text LLM prompts
-  tests/                    399 tests (pytest)
+  tests/                    426 tests (pytest)
   scripts/make_sample_data.py
 frontend/
   src/
@@ -180,7 +180,7 @@ run.sh · run.ps1 · .env.example
 
 ```bash
 cd backend
-IH_OFFLINE=1 .venv/Scripts/python -m pytest -q     # 399 tests, no network/keys needed
+IH_OFFLINE=1 .venv/Scripts/python -m pytest -q     # 426 tests, no network/keys needed
 ```
 
 Covers: SQL-injection defense, tenant isolation, per-format ingestion,
