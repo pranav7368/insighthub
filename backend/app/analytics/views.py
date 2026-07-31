@@ -1,9 +1,10 @@
 """Saved dashboard views — named, persisted dashboard configurations.
 
 A *view* captures the analytical state a user wants to return to: the active
-filters, date range, chosen measure, and which sections are hidden (the
-"customize" part). Views are workspace + dataset scoped; one view per dataset
-can be the default, auto-applied when the dataset is opened.
+filters, date range, chosen measure, which sections are hidden and the order
+they are arranged in (the "customize" part). Views are workspace + dataset
+scoped; one view per dataset can be the default, auto-applied when the dataset
+is opened.
 
 The config is stored as JSON but validated and whitelisted here first — the
 section keys must be known, filter/measure values are coerced to strings, and
@@ -37,6 +38,17 @@ class ViewNotFound(ViewError):
     """No such view in this workspace."""
 
 
+def _section_list(value, field: str) -> list[str]:
+    """Validate a list of section keys: known keys only, deduped, order kept."""
+    value = value or []
+    if not isinstance(value, list):
+        raise ViewError(f"{field} must be a list")
+    unknown = [v for v in value if v not in SECTION_KEYS]
+    if unknown:
+        raise ViewError(f"unknown section(s): {', '.join(map(str, unknown))}")
+    return list(dict.fromkeys(value))
+
+
 def _validate_config(config) -> dict:
     if config is None:
         config = {}
@@ -56,13 +68,10 @@ def _validate_config(config) -> dict:
             raise ViewError(f"{key} must be a string")
         out[key] = v or None
 
-    hidden = config.get("hidden_sections") or []
-    if not isinstance(hidden, list):
-        raise ViewError("hidden_sections must be a list")
-    unknown = [h for h in hidden if h not in SECTION_KEYS]
-    if unknown:
-        raise ViewError(f"unknown section(s): {', '.join(map(str, unknown))}")
-    out["hidden_sections"] = list(dict.fromkeys(hidden))  # dedupe, keep order
+    out["hidden_sections"] = _section_list(config.get("hidden_sections"), "hidden_sections")
+    # A partial order is legal: sections the user never dragged are simply
+    # absent, and the frontend leaves them in their natural position.
+    out["section_order"] = _section_list(config.get("section_order"), "section_order")
 
     if len(json.dumps(out).encode()) > MAX_CONFIG_BYTES:
         raise ViewError("config is too large")

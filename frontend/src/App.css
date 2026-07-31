@@ -758,3 +758,126 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   .join-row { flex-direction: column; align-items: stretch; }
   .join-eq { display: none; }
 }
+
+/* ===== Arrangeable dashboard sections ===== */
+/* Outside arrange mode this wrapper is invisible: it only exists so each
+   section is one flex child of .dash-content and can be reordered. */
+.dash-section { min-width: 0; }
+
+.arrange-hint {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  padding: 10px var(--sp-4); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--series-1) 10%, var(--surface-1));
+  border: 1px solid color-mix(in srgb, var(--series-1) 35%, transparent);
+  color: var(--text-secondary); font-size: 13px;
+}
+.arrange-hint b { color: var(--text-primary); }
+.arrange-hint button { margin-left: 0; }
+.arrange-hint button:first-of-type { margin-left: auto; }
+
+.dash-section--arranging {
+  border: 1px dashed color-mix(in srgb, var(--series-1) 55%, transparent);
+  border-radius: var(--radius); background: var(--surface-1);
+  cursor: grab; transition: border-color var(--transition), box-shadow var(--transition);
+}
+.dash-section--arranging:active { cursor: grabbing; }
+.dash-section--over {
+  border-style: solid; border-color: var(--series-1);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--series-1) 22%, transparent);
+}
+.dash-section__bar {
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+  background: var(--surface-2); border-radius: var(--radius) var(--radius) 0 0;
+}
+.dash-section__grip { color: var(--text-muted); font-size: 15px; line-height: 1; letter-spacing: -1px; }
+.dash-section__label { font-size: 12px; font-weight: 600; color: var(--text-primary); }
+.dash-section__tools { display: flex; gap: 4px; margin-left: auto; }
+.dash-section__tools button {
+  padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface-1); color: var(--text-secondary); cursor: pointer;
+  font-size: 12px; line-height: 18px; transition: border-color var(--transition), color var(--transition);
+}
+.dash-section__tools button:hover:not(:disabled) { border-color: var(--series-1); color: var(--text-primary); }
+.dash-section__tools button:disabled { opacity: 0.4; cursor: default; }
+.dash-section__hide:hover:not(:disabled) { border-color: var(--status-critical) !important; color: var(--status-critical) !important; }
+/* charts must not swallow the drag gesture (or invite interaction) while arranging */
+.dash-section__body { padding: var(--sp-3); pointer-events: none; user-select: none; }
+
+.views-btn--arrange.is-on { background: var(--series-1); border-color: var(--series-1); color: #fff; }
+
+/* ===== Industry templates ===== */
+.empty-state__divider {
+  display: flex; align-items: center; gap: var(--sp-4);
+  width: min(100%, 760px); margin: var(--sp-6) 0 var(--sp-4);
+  color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+}
+.empty-state__divider::before, .empty-state__divider::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+/* the empty state centres its children, so the gallery has to claim its width */
+.tpl-anchor { width: 100%; display: flex; justify-content: center; }
+.tpl-inline { width: 100%; max-width: 980px; }
+.tpl-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: var(--sp-3); text-align: left;
+}
+.tpl-grid--compact { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.tpl-card {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: var(--sp-4); border-radius: var(--radius); cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary);
+  font: inherit; text-align: left;
+  transition: border-color var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+.tpl-card:hover:not(:disabled) {
+  border-color: var(--series-1); box-shadow: var(--shadow); transform: translateY(-2px);
+}
+.tpl-card:disabled { opacity: 0.55; cursor: default; }
+.tpl-card[aria-busy="true"] { opacity: 1; border-color: var(--series-1); }
+.tpl-card__icon { font-size: 22px; line-height: 1; }
+.tpl-card__industry {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--text-muted);
+}
+.tpl-card__label { font-size: 15px; font-weight: 600; }
+.tpl-card__desc { font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
+.tpl-card__chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.tpl-chip {
+  padding: 2px 8px; border-radius: var(--radius-pill); background: var(--surface-2);
+  color: var(--text-secondary); font-size: 11px; white-space: nowrap;
+}
+.tpl-card__metrics {
+  margin-top: auto; padding-top: var(--sp-2); font-size: 12px; font-weight: 600; color: var(--series-1);
+}
+.tpl-error { color: var(--status-critical); font-size: 13px; margin-bottom: var(--sp-3); }
+
+/* ===== First-run product tour ===== */
+.tour { position: fixed; inset: 0; z-index: 80; }
+.tour__blocker { position: absolute; inset: 0; }
+.tour__spot {
+  position: fixed; border-radius: var(--radius); pointer-events: none;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.58), 0 0 0 2px var(--series-1) inset;
+  transition: top 0.2s ease, left 0.2s ease, width 0.2s ease, height 0.2s ease;
+}
+/* with no anchor the whole screen dims behind the card */
+.tour:not(:has(.tour__spot)) .tour__blocker { background: rgba(0, 0, 0, 0.58); }
+.tour__card {
+  position: fixed; z-index: 1; padding: var(--sp-5);
+  background: var(--surface-1); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+}
+.tour__card h3 { margin: 0 0 6px; font-size: 16px; }
+.tour__card p { margin: 0 0 var(--sp-4); font-size: 13px; line-height: 1.55; color: var(--text-secondary); }
+.tour__progress { display: flex; gap: 5px; margin-bottom: var(--sp-3); }
+.tour__dot { width: 16px; height: 3px; border-radius: var(--radius-pill); background: var(--border); }
+.tour__dot.is-on { background: var(--series-1); }
+.tour__actions { display: flex; align-items: center; gap: var(--sp-2); }
+.tour__skip {
+  margin-right: auto; padding: 6px 2px; border: none; background: none; cursor: pointer;
+  color: var(--text-muted); font: inherit; font-size: 12px; text-decoration: underline;
+}
+.tour__skip:hover { color: var(--text-secondary); }
+@media (max-width: 480px) {
+  .tour__card { left: 12px !important; width: calc(100vw - 24px) !important; }
+}

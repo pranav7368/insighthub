@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { getSchema, listDatasets, loadSampleData, overrideColumn, uploadDataset } from "./api";
+import { getSchema, listDatasets, overrideColumn, uploadDataset } from "./api";
 import Login from "./components/Login";
 import UploadButton from "./components/UploadButton";
 import ConnectSource from "./components/ConnectSource";
+import TemplateGallery from "./components/TemplateGallery";
 import ShareDialog from "./components/ShareDialog";
 import AlertsDialog from "./components/AlertsDialog";
 import MetricsDialog from "./components/MetricsDialog";
@@ -15,6 +16,8 @@ import UpdateData from "./components/UpdateData";
 import DashboardView from "./components/DashboardView";
 import ComparePane from "./components/ComparePane";
 import AskView from "./components/AskView";
+import TourOverlay from "./components/TourOverlay";
+import { TOUR_KEY, TOUR_STEPS } from "./tour";
 
 function useTheme() {
   const [theme, setTheme] = useState(() => localStorage.getItem("ih_theme") || "auto");
@@ -38,6 +41,7 @@ export default function App() {
   const [showQuality, setShowQuality] = useState(false);
   const [showUpdate, setShowUpdate] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
   const [showMetrics, setShowMetrics] = useState(false);
@@ -45,9 +49,22 @@ export default function App() {
   const [showTeam, setShowTeam] = useState(false);
   const [showBilling, setShowBilling] = useState(false);
   const [dashboardKey, setDashboardKey] = useState(0);  // bump to force dashboard reload after cleaning
+  const [tourOn, setTourOn] = useState(false);
 
   const canEdit = role === "admin" || role === "editor";
   const isAdmin = role === "admin";
+
+  // First run: show the tour once the shell has mounted, so its anchors exist.
+  useEffect(() => {
+    if (!authed || localStorage.getItem(TOUR_KEY)) return;
+    const t = setTimeout(() => setTourOn(true), 400);
+    return () => clearTimeout(t);
+  }, [authed]);
+
+  const endTour = () => {
+    localStorage.setItem(TOUR_KEY, "done");
+    setTourOn(false);
+  };
 
   const refresh = useCallback(async () => {
     const list = await listDatasets();
@@ -82,17 +99,6 @@ export default function App() {
       setTab("dashboard");
     }
     setDashboardKey((k) => k + 1);
-  };
-
-  const [loadingSample, setLoadingSample] = useState(false);
-  const handleLoadSample = async () => {
-    setLoadingSample(true);
-    try {
-      const res = await loadSampleData();
-      await handleConnected(res.dataset_id);
-    } finally {
-      setLoadingSample(false);
-    }
   };
 
   const openSchema = async () => {
@@ -133,17 +139,24 @@ export default function App() {
           {structuredDatasets.length > 0 && (
             <button className={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>Compare</button>
           )}
-          <button className={tab === "ask" ? "active" : ""} onClick={() => setTab("ask")}>Ask</button>
+          <button data-tour="ask" className={tab === "ask" ? "active" : ""} onClick={() => setTab("ask")}>Ask</button>
         </nav>
         <div className="app-header__actions">
-          {canEdit && <button className="ghost-btn" onClick={() => setShowConnect(true)}>Connect source</button>}
-          {canEdit && <UploadButton onUpload={handleUpload} />}
+          {canEdit && structuredDatasets.length > 0 && (
+            <button className="ghost-btn" data-tour="templates" onClick={() => setShowTemplates(true)}>Templates</button>
+          )}
+          {canEdit && (
+            <button className="ghost-btn" data-tour="connect" onClick={() => setShowConnect(true)}>Connect source</button>
+          )}
+          {canEdit && <span data-tour="upload"><UploadButton onUpload={handleUpload} /></span>}
           {isAdmin && <button className="ghost-btn" onClick={() => setShowTeam(true)}>Team</button>}
           {isAdmin && <button className="ghost-btn" onClick={() => setShowBilling(true)}>Billing</button>}
           <button className="icon-btn" title={`Theme: ${theme}`} aria-label="Toggle theme"
             onClick={() => setTheme(theme === "dark" ? "light" : theme === "light" ? "auto" : "dark")}>
             {theme === "dark" ? "☾" : theme === "light" ? "☀" : "◐"}
           </button>
+          <button className="icon-btn" title="Replay the product tour" aria-label="Replay the product tour"
+            onClick={() => setTourOn(true)}>?</button>
           <button className="ghost-btn" onClick={logout}>Log out</button>
         </div>
       </header>
@@ -183,12 +196,16 @@ export default function App() {
                 ? "Upload a CSV or Excel file — the dashboard builds itself. Or connect a Google Sheet / CSV link that stays in sync. Upload a PDF or Word document to ask questions about it in the “Ask” tab."
                 : "No dashboards have been added to this workspace yet. Ask an admin or editor to upload data or connect a source."}</p>
               {canEdit && (
-                <div className="empty-state__actions">
-                  <button className="src-connect" onClick={handleLoadSample} disabled={loadingSample}>
-                    {loadingSample ? "Loading…" : "Try with sample data"}
-                  </button>
-                  <button className="ghost-btn" onClick={() => setShowConnect(true)}>Connect a Google Sheet</button>
-                </div>
+                <>
+                  <div className="empty-state__actions">
+                    <UploadButton onUpload={handleUpload} label="Upload your data" primary />
+                    <button className="ghost-btn" onClick={() => setShowConnect(true)}>Connect a Google Sheet</button>
+                  </div>
+                  <div className="empty-state__divider"><span>or explore an industry template</span></div>
+                  <div className="tpl-anchor" data-tour="templates">
+                    <TemplateGallery onLoaded={handleConnected} />
+                  </div>
+                </>
               )}
             </div>
           ) : (
@@ -203,6 +220,13 @@ export default function App() {
         <ConnectSource
           onClose={() => setShowConnect(false)}
           onConnected={handleConnected}
+        />
+      )}
+      {showTemplates && (
+        <TemplateGallery
+          compact
+          onLoaded={handleConnected}
+          onClose={() => setShowTemplates(false)}
         />
       )}
       {showShare && datasetId && (
@@ -246,6 +270,7 @@ export default function App() {
           onChanged={() => { refresh(); setDashboardKey((k) => k + 1); }}
         />
       )}
+      {tourOn && <TourOverlay steps={TOUR_STEPS} onFinish={endTour} />}
     </div>
   );
 }

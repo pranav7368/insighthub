@@ -21,10 +21,12 @@ import MapChart from "./MapChart";
 import CertifiedMetrics from "./CertifiedMetrics";
 import DriverAnalysis from "./DriverAnalysis";
 import ViewsBar from "./ViewsBar";
-import { humanLabel } from "../format";
+import DashSection from "./DashSection";
 import { mappableFraction } from "../geo";
+import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections";
 
-// stable JSON for comparing a live config against a saved one (dirty check)
+// stable JSON for comparing a live config against a saved one (dirty check).
+// hidden_sections is a set (sorted), section_order is a sequence (kept as-is).
 const canonConfig = (c) =>
   JSON.stringify({
     filters: Object.fromEntries(Object.entries(c.filters || {}).sort()),
@@ -32,6 +34,7 @@ const canonConfig = (c) =>
     date_to: c.date_to || null,
     measure: c.measure || null,
     hidden_sections: [...(c.hidden_sections || [])].sort(),
+    section_order: [...(c.section_order || [])],
   });
 
 export default function DashboardView({ datasetId }) {
@@ -46,6 +49,8 @@ export default function DashboardView({ datasetId }) {
   const [exporting, setExporting] = useState(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [hiddenSections, setHiddenSections] = useState([]);
+  const [sectionOrder, setSectionOrder] = useState([]);
+  const [arranging, setArranging] = useState(false);
   const [views, setViews] = useState([]);
   const [activeViewId, setActiveViewId] = useState(null);
   const [metrics, setMetrics] = useState([]);
@@ -58,6 +63,7 @@ export default function DashboardView({ datasetId }) {
     date_to: dateTo || null,
     measure: activeMeasure || null,
     hidden_sections: hiddenSections,
+    section_order: sectionOrder,
   });
 
   const applyView = (view) => {
@@ -67,6 +73,7 @@ export default function DashboardView({ datasetId }) {
     setDateTo(c.date_to || undefined);
     setActiveMeasure(c.measure || null);
     setHiddenSections(Array.isArray(c.hidden_sections) ? c.hidden_sections : []);
+    setSectionOrder(Array.isArray(c.section_order) ? c.section_order : []);
     setActiveViewId(view.view_id);
   };
 
@@ -97,6 +104,14 @@ export default function DashboardView({ datasetId }) {
   const toggleSection = (key) =>
     setHiddenSections((h) => (h.includes(key) ? h.filter((x) => x !== key) : [...h, key]));
 
+  // Dragging materializes the *full* key order (including hidden sections, so
+  // they keep their place if they are shown again later).
+  const reorderSection = (from, to) =>
+    setSectionOrder((o) => moveKey(resolveOrder(o), from, to));
+  const stepSection = (key, step, visibleKeys) =>
+    setSectionOrder((o) => moveKeyByStep(resolveOrder(o), key, visibleKeys, step));
+  const resetArrangement = () => { setSectionOrder([]); setHiddenSections([]); };
+
   const show = (key) => !hiddenSections.includes(key);
   const activeView = views.find((v) => v.view_id === activeViewId) || null;
   const viewDirty = activeView ? canonConfig(activeView.config) !== canonConfig(currentConfig()) : false;
@@ -117,7 +132,7 @@ export default function DashboardView({ datasetId }) {
 
   useEffect(() => {
     setActiveMeasure(null); setFilters({}); setDateFrom(undefined); setDateTo(undefined); setPair(null);
-    setHiddenSections([]); setActiveViewId(null);
+    setHiddenSections([]); setSectionOrder([]); setArranging(false); setActiveViewId(null);
     listViews(datasetId)
       .then((vs) => {
         setViews(vs);
@@ -127,6 +142,14 @@ export default function DashboardView({ datasetId }) {
       .catch(() => setViews([]));
     listMetrics(datasetId).then(setMetrics).catch(() => setMetrics([]));
   }, [datasetId]);
+
+  // Esc leaves arrange mode — the usual way out of a transient editing mode
+  useEffect(() => {
+    if (!arranging) return;
+    const onKey = (e) => { if (e.key === "Escape") setArranging(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [arranging]);
 
   // when the user clicks a heatmap cell, fetch that pair (respecting filters)
   useEffect(() => {
@@ -192,6 +215,109 @@ export default function DashboardView({ datasetId }) {
 
   const activeFilterCount = Object.keys(filters).length + (dateFrom ? 1 : 0);
 
+  // Every section, in its natural order. A null node means "this dataset has
+  // nothing to show here" — those drop out entirely so arrange mode never
+  // offers an empty tile to drag.
+  const allSections = [
+    {
+      key: "kpis",
+      node: dashboard.kpis.length === 0 ? (
+        <div className="empty-panel">
+          No numeric measures detected in this dataset. Use “Review columns” to fix the roles.
+        </div>
+      ) : (
+        <div className="kpi-row">
+          {dashboard.kpis.map((kpi) => (
+            <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
+              onSelect={() => setActiveMeasure(kpi.column)} />
+          ))}
+        </div>
+      ),
+    },
+    { key: "metrics", node: metrics.length > 0 && <CertifiedMetrics metrics={metrics} /> },
+    { key: "drivers", node: <DriverAnalysis explain={explainData} /> },
+    { key: "growth", node: <GrowthStrip growth={dashboard.growth} measure={measure} /> },
+    { key: "insights", node: <InsightsPanel insights={dashboard.insights} /> },
+    { key: "narrative", node: <AiNarrative datasetId={datasetId} /> },
+    {
+      key: "forecast",
+      node: measure && (
+        <ForecastChart
+          measure={measure} subtype={subtypeOf(measure)}
+          forecast={dashboard.forecasts?.[measure]}
+          anomalies={dashboard.anomalies?.[measure]}
+        />
+      ),
+    },
+    {
+      key: "breakdowns",
+      node: (
+        <div className="chart-grid">
+          {Object.entries(dashboard.breakdowns).map(([dim, bd]) => (
+            <BreakdownChart key={dim} dimensionName={dim} breakdown={bd}
+              measure={measure} subtype={subtypeOf(measure)}
+              onSelect={toggleFilter} activeValue={filters[dim]} />
+          ))}
+          {Object.entries(dashboard.breakdowns).slice(0, 1).map(([dim, bd]) => (
+            <ContributionDonut key={`donut-${dim}`} dimensionName={dim} breakdown={bd}
+              subtype={subtypeOf(measure)} onSelect={toggleFilter} activeValue={filters[dim]} />
+          ))}
+        </div>
+      ),
+    },
+    {
+      key: "map",
+      node: geoEntry && (
+        <MapChart dimensionName={geoEntry[0]} breakdown={geoEntry[1]}
+          measure={measure} subtype={subtypeOf(measure)} />
+      ),
+    },
+    {
+      key: "pareto",
+      node: dashboard.pareto && dashboard.pareto.total_categories > 2 && (
+        <ParetoChart pareto={dashboard.pareto} />
+      ),
+    },
+    {
+      key: "treemap",
+      node: dashboard.treemap && <TreemapChart treemap={dashboard.treemap} subtype={subtypeOf(measure)} />,
+    },
+    {
+      key: "correlations",
+      node: dashboard.correlations && (() => {
+        const scatterToShow = customScatter || dashboard.scatter;
+        const activePair = scatterToShow ? { x: scatterToShow.x, y: scatterToShow.y } : null;
+        return (
+          <div className="chart-grid">
+            <CorrelationHeatmap correlations={dashboard.correlations} activePair={activePair}
+              onSelect={(x, y) => setPair({ x, y })} />
+            <ScatterPlot scatter={scatterToShow} />
+          </div>
+        );
+      })(),
+    },
+    {
+      key: "distributions",
+      node: distNames.length > 0 && (
+        <div className="dist-section">
+          <div className="section-title">Distribution of each measure</div>
+          <div className="dist-grid">
+            {distNames.map((name) => (
+              <DistributionCard key={name} name={name} dist={dashboard.distributions[name]} />
+            ))}
+          </div>
+        </div>
+      ),
+    },
+    { key: "profile", node: <DataProfile profile={dashboard.data_profile} /> },
+  ];
+
+  const visible = orderSections(
+    allSections.filter((s) => s.node && show(s.key)),
+    sectionOrder
+  );
+  const visibleKeys = visible.map((s) => s.key);
+
   return (
     <div className="dash-layout">
       <div className={`filter-panel${filtersOpen ? " filter-panel--open" : ""}`}>
@@ -217,13 +343,14 @@ export default function DashboardView({ datasetId }) {
             {dashboard.dataset?.name}
             <span className="dash-topline__rows">{dashboard.row_count_filtered?.toLocaleString("en-IN")} rows</span>
           </div>
-          <div className="dash-topline__actions">
+          <div className="dash-topline__actions" data-tour="views">
             <ViewsBar
               views={views} activeViewId={activeViewId} dirty={viewDirty}
-              hiddenSections={hiddenSections}
+              hiddenSections={hiddenSections} arranging={arranging}
               onApply={applyView} onToggleSection={toggleSection}
               onSave={saveView} onUpdate={updateActiveView}
               onDelete={deleteActiveView} onSetDefault={setDefaultActiveView}
+              onToggleArrange={() => setArranging((a) => !a)}
             />
             <button className="filters-toggle no-export" onClick={() => setFiltersOpen((o) => !o)}>
               Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
@@ -248,90 +375,25 @@ export default function DashboardView({ datasetId }) {
 
         <FilterChips filters={filters} onRemove={removeFilter} onClearAll={() => setFilters({})} />
 
-        {show("kpis") && dashboard.kpis.length === 0 && (
-          <div className="empty-panel">
-            No numeric measures detected in this dataset. Use “Review columns” to fix the roles.
+        {arranging && (
+          <div className="arrange-hint no-export">
+            <b>Arranging.</b> Drag a section by its bar, or use ↑ ↓ — then save the view to keep this layout.
+            <button className="views-btn" onClick={resetArrangement}>Reset layout</button>
+            <button className="views-btn views-btn--accent" onClick={() => setArranging(false)}>Done</button>
           </div>
         )}
 
-        {show("kpis") && (
-          <div className="kpi-row">
-            {dashboard.kpis.map((kpi) => (
-              <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
-                onSelect={() => setActiveMeasure(kpi.column)} />
-            ))}
-          </div>
-        )}
-
-        {show("metrics") && metrics.length > 0 && <CertifiedMetrics metrics={metrics} />}
-
-        {show("growth") && <GrowthStrip growth={dashboard.growth} measure={measure} />}
-
-        {show("insights") && <InsightsPanel insights={dashboard.insights} />}
-
-        {show("drivers") && <DriverAnalysis explain={explainData} />}
-
-        {show("narrative") && <AiNarrative datasetId={datasetId} />}
-
-        {show("forecast") && measure && (
-          <ForecastChart
-            measure={measure} subtype={subtypeOf(measure)}
-            forecast={dashboard.forecasts?.[measure]}
-            anomalies={dashboard.anomalies?.[measure]}
-          />
-        )}
-
-        {show("breakdowns") && (
-          <div className="chart-grid">
-            {Object.entries(dashboard.breakdowns).map(([dim, bd]) => (
-              <BreakdownChart key={dim} dimensionName={dim} breakdown={bd}
-                measure={measure} subtype={subtypeOf(measure)}
-                onSelect={toggleFilter} activeValue={filters[dim]} />
-            ))}
-            {Object.entries(dashboard.breakdowns).slice(0, 1).map(([dim, bd]) => (
-              <ContributionDonut key={`donut-${dim}`} dimensionName={dim} breakdown={bd}
-                subtype={subtypeOf(measure)} onSelect={toggleFilter} activeValue={filters[dim]} />
-            ))}
-          </div>
-        )}
-
-        {show("map") && geoEntry && (
-          <MapChart dimensionName={geoEntry[0]} breakdown={geoEntry[1]}
-            measure={measure} subtype={subtypeOf(measure)} />
-        )}
-
-        {show("pareto") && dashboard.pareto && dashboard.pareto.total_categories > 2 && (
-          <ParetoChart pareto={dashboard.pareto} />
-        )}
-
-        {show("treemap") && dashboard.treemap && (
-          <TreemapChart treemap={dashboard.treemap} subtype={subtypeOf(measure)} />
-        )}
-
-        {show("correlations") && dashboard.correlations && (() => {
-          const scatterToShow = customScatter || dashboard.scatter;
-          const activePair = scatterToShow ? { x: scatterToShow.x, y: scatterToShow.y } : null;
-          return (
-            <div className="chart-grid">
-              <CorrelationHeatmap correlations={dashboard.correlations} activePair={activePair}
-                onSelect={(x, y) => setPair({ x, y })} />
-              <ScatterPlot scatter={scatterToShow} />
-            </div>
-          );
-        })()}
-
-        {show("distributions") && distNames.length > 0 && (
-          <div className="dist-section">
-            <div className="section-title">Distribution of each measure</div>
-            <div className="dist-grid">
-              {distNames.map((name) => (
-                <DistributionCard key={name} name={name} dist={dashboard.distributions[name]} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {show("profile") && <DataProfile profile={dashboard.data_profile} />}
+        {visible.map(({ key, node }, i) => (
+          <DashSection
+            key={key} sectionKey={key} arranging={arranging}
+            isFirst={i === 0} isLast={i === visible.length - 1}
+            onReorder={reorderSection}
+            onMove={(step) => stepSection(key, step, visibleKeys)}
+            onHide={() => toggleSection(key)}
+          >
+            {node}
+          </DashSection>
+        ))}
       </div>
     </div>
   );

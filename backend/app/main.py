@@ -54,7 +54,9 @@ from .ingest.connectors import (
     list_sources, sync_source,
 )
 from .ingest.pipeline import create_structured_dataset, ingest_upload
-from .ingest.sample import build_sample_df
+from .ingest.templates import (
+    DEFAULT_TEMPLATE_ID, Template, UnknownTemplate, catalog, get_template,
+)
 from .core.sqlsafe import safe_identifier, safe_table_name
 from .qa.engine import answer_question
 
@@ -371,19 +373,65 @@ async def upload(file: UploadFile, principal: Principal = Depends(require_editor
     }
 
 
-@app.post("/api/datasets/sample")
-def load_sample(principal: Principal = Depends(require_editor)):
-    """One-click sample dataset so a new user immediately sees a full dashboard."""
-    con = db.connect()
+def _materialize_template(con, principal: Principal, tpl: Template) -> dict:
+    """Build a template's dataset, then its certified metrics and default view.
+
+    The dataset is the deliverable; the metrics and the view are presentation
+    on top of it. A failure in either of those must not lose the data the user
+    just created, so they are best-effort — the dashboard still renders, just
+    without the pre-built arrangement.
+    """
     try:
         check_quota(con, principal.workspace_id, "datasets")
     except QuotaError as exc:
         raise HTTPException(status_code=402, detail=str(exc))
+
     result = create_structured_dataset(
-        con, principal.workspace_id, "Sample — Retail Sales", build_sample_df(), "sample")
-    db.audit(con, principal.workspace_id, principal.user_id, "sample", result.dataset_id)
+        con, principal.workspace_id, tpl.dataset_name, tpl.build(), f"template:{tpl.id}")
+
+    metrics_created = 0
+    for m in tpl.metrics:
+        try:
+            create_metric(con, principal.workspace_id, result.dataset_id,
+                          m.name, m.kind, m.definition, m.format)
+            metrics_created += 1
+        except (MetricError, DatasetNotFound):
+            pass          # a metric that does not fit the data is simply skipped
+    try:
+        create_view(con, principal.workspace_id, result.dataset_id,
+                    tpl.view_name, tpl.view_config(), make_default=True)
+    except (ViewError, DatasetNotFound):
+        pass
+
+    db.audit(con, principal.workspace_id, principal.user_id, "template", f"{tpl.id}:{result.dataset_id}")
     return {"dataset_id": result.dataset_id, "name": result.name, "kind": "structured",
-            "row_count": result.row_count}
+            "row_count": result.row_count, "template_id": tpl.id, "metrics": metrics_created}
+
+
+@app.get("/api/templates")
+def list_templates(principal: Principal = Depends(get_principal)):
+    """The industry template catalog shown on the empty-state gallery."""
+    return catalog()
+
+
+class TemplateBody(BaseModel):
+    template_id: str = DEFAULT_TEMPLATE_ID
+
+
+@app.post("/api/datasets/template")
+def load_template(body: TemplateBody, principal: Principal = Depends(require_editor)):
+    """One click: an industry dataset with its metrics and dashboard arrangement."""
+    try:
+        tpl = get_template(body.template_id)
+    except UnknownTemplate as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _materialize_template(db.connect(), principal, tpl)
+
+
+@app.post("/api/datasets/sample")
+def load_sample(principal: Principal = Depends(require_editor)):
+    """One-click sample dataset so a new user immediately sees a full dashboard."""
+    return _materialize_template(db.connect(), principal, get_template(DEFAULT_TEMPLATE_ID))
 
 
 @app.get("/api/datasets/{dataset_id}/export.csv")
@@ -624,7 +672,10 @@ def public_dashboard(token: str):
         )
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="this dashboard is no longer available")
-    return {"dashboard": dash, "meta": {"hidden_sections": cfg.get("hidden_sections", [])}}
+    return {"dashboard": dash, "meta": {
+        "hidden_sections": cfg.get("hidden_sections", []),
+        "section_order": cfg.get("section_order", []),
+    }}
 
 
 # ------------------------------------------------- threshold alerts ------

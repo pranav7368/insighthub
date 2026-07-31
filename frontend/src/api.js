@@ -21,6 +21,24 @@ client.interceptors.response.use(
   }
 );
 
+/**
+ * A displayable message from an axios error.
+ *
+ * FastAPI answers a handled failure with a string `detail`, but a request that
+ * fails schema validation (422) answers with a *list* of error objects —
+ * rendering that straight into JSX throws "Objects are not valid as a React
+ * child" and takes the page down. Always funnel API errors through here.
+ */
+export function errorText(err, fallback = "Something went wrong") {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail.map((d) => d?.msg).filter(Boolean);
+    if (msgs.length) return msgs.join("; ");
+  }
+  return fallback;
+}
+
 export const signup = (email, password, workspace_name) =>
   client.post("/auth/signup", { email, password, workspace_name }).then((r) => r.data);
 
@@ -38,6 +56,12 @@ export const uploadDataset = (file) => {
 };
 
 export const loadSampleData = () => client.post("/datasets/sample").then((r) => r.data);
+
+// --- Industry templates (dataset + certified metrics + arranged default view) ---
+export const listTemplates = () => client.get("/templates").then((r) => r.data);
+
+export const loadTemplate = (templateId) =>
+  client.post("/datasets/template", { template_id: templateId }).then((r) => r.data);
 
 export const exportDatasetCsv = (datasetId, name) =>
   client.get(`/datasets/${datasetId}/export.csv`, { responseType: "blob" }).then((r) => {

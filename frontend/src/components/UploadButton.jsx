@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 
-export default function UploadButton({ onUpload }) {
+export default function UploadButton({ onUpload, label = "+ Upload data", primary = false }) {
   const inputRef = useRef(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -22,8 +22,9 @@ export default function UploadButton({ onUpload }) {
 
   return (
     <div className="upload-button">
-      <button onClick={() => inputRef.current?.click()} disabled={busy}>
-        {busy ? "Uploading…" : "+ Upload data"}
+      <button className={primary ? "src-connect" : undefined}
+        onClick={() => inputRef.current?.click()} disabled={busy}>
+        {busy ? "Uploading…" : label}
       </button>
       <input ref={inputRef} type="file" accept=".csv,.xlsx,.xlsm,.pdf,.docx,.txt,.md" hidden onChange={handleChange} />
       {error && <div className="upload-error">{error}</div>}

@@ -69,6 +69,32 @@ def test_unknown_section_rejected(ds):
         create_view(con, ws, dsid, "bad", {"hidden_sections": ["not_a_section"]})
 
 
+def test_section_order_roundtrip(ds):
+    con, ws, dsid = ds
+    order = ["forecast", "kpis", "breakdowns"]
+    v = create_view(con, ws, dsid, "arranged", {**CFG, "section_order": order})
+    assert v["config"]["section_order"] == order
+
+
+def test_section_order_defaults_to_empty(ds):
+    """An old view saved before ordering existed still loads."""
+    con, ws, dsid = ds
+    v = create_view(con, ws, dsid, "legacy", {"measure": "revenue"})
+    assert v["config"]["section_order"] == []
+
+
+def test_section_order_rejects_unknown_keys(ds):
+    con, ws, dsid = ds
+    with pytest.raises(ViewError):
+        create_view(con, ws, dsid, "bad order", {"section_order": ["kpis", "wat"]})
+
+
+def test_section_order_is_deduped_keeping_first_position(ds):
+    con, ws, dsid = ds
+    v = create_view(con, ws, dsid, "dupes", {"section_order": ["kpis", "forecast", "kpis"]})
+    assert v["config"]["section_order"] == ["kpis", "forecast"]
+
+
 def test_oversized_config_rejected(ds):
     con, ws, dsid = ds
     huge = {"filters": {f"k{i}": "v" * 100 for i in range(200)}}

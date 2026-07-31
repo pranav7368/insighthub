@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS dashboard_views (
     workspace_id VARCHAR NOT NULL,
     dataset_id   VARCHAR NOT NULL,
     name         VARCHAR NOT NULL,
-    config       VARCHAR NOT NULL,      -- JSON: filters/date_from/date_to/measure/hidden_sections
+    config       VARCHAR NOT NULL,      -- JSON: filters/date_from/date_to/measure/hidden_sections/section_order
     is_default   BOOLEAN DEFAULT false,
     created_at   TIMESTAMP DEFAULT current_timestamp,
     updated_at   TIMESTAMP DEFAULT current_timestamp

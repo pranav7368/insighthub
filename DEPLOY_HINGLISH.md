@@ -62,6 +62,7 @@ InsightHub/
 │   │   │   ├── pipeline.py      # upload -> parse -> table banana
 │   │   │   ├── parsers.py       # csv/xlsx/pdf/docx padhna
 │   │   │   ├── append.py        # monthly/incremental data add karna
+│   │   │   ├── templates.py     # industry templates (retail/saas/ecom/logistics/health)
 │   │   │   └── connectors.py    # live source (URL / Google Sheet) sync
 │   │   ├── qa/                  # document Q&A (PDF/Word pe)
 │   │   │   ├── llm.py           # multi-provider LLM (Claude/OpenAI/Gemini/Ollama)
@@ -70,7 +71,7 @@ InsightHub/
 │   │   ├── billing.py           # plans + quota (plan gating)
 │   │   ├── billing_stripe.py    # Stripe checkout + webhook
 │   │   └── members.py           # team members + roles (admin/editor/viewer)
-│   ├── tests/                   # 209 tests (pytest)
+│   ├── tests/                   # 266 tests (pytest)
 │   └── scripts/                 # sample data generator
 │
 └── frontend/                    # === FRONTEND (React / Vite) ===
@@ -185,7 +186,7 @@ cd backend
 Tests chalane ke liye:
 ```bash
 cd backend
-IH_OFFLINE=1 .venv/Scripts/python -m pytest -q      # 209 tests
+IH_OFFLINE=1 .venv/Scripts/python -m pytest -q      # 266 tests
 ```
 
 ---
