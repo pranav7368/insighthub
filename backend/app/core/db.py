@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlparse
 import duckdb
 
 from . import config
+from .migrations import run_migrations
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
@@ -300,6 +301,7 @@ def _connect_postgres() -> duckdb.DuckDBPyConnection:
     con.execute("USE pg")
     if not _pg_schema_ready:
         con.execute(SCHEMA)
+        run_migrations(con)
         _pg_schema_ready = True
     return con
 
@@ -317,6 +319,7 @@ def _new_connection() -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(path))
     con.execute(SCHEMA)
+    run_migrations(con)
     return con
 
 
@@ -331,6 +334,7 @@ def connect(db_path: str | Path | None = None) -> duckdb.DuckDBPyConnection:
         path.parent.mkdir(parents=True, exist_ok=True)
         con = duckdb.connect(str(path))
         con.execute(SCHEMA)
+        run_migrations(con)
         return con
 
     if not config.DB_POOL_ENABLED:
