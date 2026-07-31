@@ -100,11 +100,32 @@ def _validate_intent(parsed: dict, schema: dict) -> QueryIntent:
     allowed_measures = {m["name"] for m in schema["measures"]}
     allowed_dims = {d["name"] for d in schema["dimensions"]}
 
+    # A reference the dataset has no idea about (a region that does not exist,
+    # a column we never received). Answering anyway means computing a real
+    # number about something the user did not ask for.
+    unresolved = [str(u) for u in (parsed.get("unresolved") or []) if str(u).strip()]
+    if unresolved:
+        raise QueryError(
+            f"this dataset has nothing matching {unresolved[0]!r}, so that question "
+            "cannot be answered from it"
+        )
+
     agg = str(parsed.get("aggregation", "sum")).lower()
     if agg not in AGGREGATIONS:
         agg = "sum"
 
+    # A named metric we do not have is NOT a validation detail to paper over.
+    # Substituting the first available measure answers a different question
+    # than the one asked, with a real number and real SQL behind it — the
+    # "plausible but wrong" failure this product exists to prevent. Refuse.
     metric = parsed.get("metric")
+    named = metric is not None and str(metric).strip() != ""
+    if named and metric not in allowed_measures:
+        available = ", ".join(sorted(allowed_measures)) or "none"
+        raise QueryError(
+            f"this dataset has nothing called {str(metric)!r} to measure. "
+            f"Available measures: {available}."
+        )
     if metric not in allowed_measures:
         metric = next(iter(allowed_measures), None) if agg != "count" else None
 
@@ -211,6 +232,12 @@ def execute_intent(con, workspace_id: str, dataset_id: str, intent: QueryIntent,
     # scalar (KPI)
     sql = f"SELECT {value_expr} AS v FROM {table} {where_sql}"
     value = con.execute(sql, params).fetchone()[0]
+    if value is None and intent.filters:
+        # No rows matched. Reporting "0" here would present the absence of data
+        # as a measured fact — e.g. "revenue for a region that does not exist
+        # is zero". Say what actually happened instead.
+        described = ", ".join(f"{k} = {v}" for k, v in intent.filters.items())
+        raise QueryError(f"no rows match {described}, so there is nothing to measure")
     return {"kind": "scalar", "value": value, "subtype": subtype,
             "chart_type": "kpi", "query": readable, "intent": intent.as_dict(),
             "sql": _display_sql(sql, physical, dataset_name, params)}
