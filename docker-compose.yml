@@ -1,0 +1,46 @@
+# InsightHub — full stack: Postgres + FastAPI backend + nginx-served frontend.
+#   docker compose up --build      then open http://localhost:8080
+# The frontend proxies /api to the backend, so it's single-origin. Data lives
+# in Postgres (durable across restarts via the pgdata volume).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: insighthub
+      POSTGRES_PASSWORD: insighthub
+      POSTGRES_DB: insighthub
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U insighthub"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ./backend
+    environment:
+      IH_DATABASE_URL: postgresql://insighthub:insighthub@db:5432/insighthub
+      # Set a real secret in production (and IH_ENV=production to enforce it).
+      IH_SECRET_KEY: ${IH_SECRET_KEY:-dev-only-insecure-change-me-0000000000000000}
+      IH_DB_POOL: "1"
+      IH_TRUST_PROXY: "1"          # behind nginx → read X-Forwarded-For for rate limiting
+      IH_OFFLINE: ${IH_OFFLINE:-1} # deterministic out of the box; set an LLM provider for real AI
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8010"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE: /api
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

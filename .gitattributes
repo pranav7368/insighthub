@@ -1,0 +1,14 @@
+# Normalize line endings so the repo behaves the same on Windows, macOS, Linux.
+* text=auto eol=lf
+
+# Windows-only scripts keep CRLF.
+*.ps1 text eol=crlf
+
+# Binary assets (never normalize / diff as text).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

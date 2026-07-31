@@ -1,0 +1,27 @@
+# InsightHub backend — runtime dependencies (pinned)
+fastapi==0.141.1
+uvicorn[standard]==0.52.0
+duckdb==1.5.5
+pandas==3.0.5
+numpy==2.5.1
+openpyxl==3.1.5
+python-multipart==0.0.32
+pypdf==6.14.2
+python-docx==1.2.0
+
+# Auth
+bcrypt==5.0.0
+PyJWT==2.13.0
+email-validator==2.3.0
+
+# LLM providers — only the one you configure is used at runtime; both are light.
+anthropic==0.120.2   # Claude
+openai==2.50.0       # OpenAI, Gemini, Ollama, Groq, OpenRouter, Together (OpenAI-compatible)
+
+# Optional: real sentence embeddings for document Q&A. If absent, a built-in
+# hashing embedder is used automatically (lower quality, zero setup).
+# sentence-transformers>=3.0
+
+# Dev / test
+pytest==9.1.1
+httpx==0.28.1

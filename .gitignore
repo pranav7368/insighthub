@@ -1,0 +1,48 @@
+# ─────────────────────────────  Secrets  ─────────────────────────────
+# Never commit real config. The template `.env.example` IS committed.
+.env
+.env.*
+!.env.example
+
+# ──────────────────────────────  Python  ─────────────────────────────
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ───────────────────────────  Node / frontend  ───────────────────────
+node_modules/
+dist/
+.vite/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ───────────────────────  Databases & local data  ────────────────────
+# DuckDB files, the data dir, and DB dumps are runtime state, not source.
+data/
+*.duckdb
+*.duckdb.wal
+*.sql.bak
+*.dump
+
+# Local scratch / sample CSVs (the app generates sample data in-code).
+messy_sales.csv
+new_month.csv
+sample_company_sales.csv
+sample_policy.txt
+*.local.csv
+
+# ─────────────────────────────  OS / editor  ─────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~

@@ -1,0 +1,201 @@
+import axios from "axios";
+
+// Dev: talk to the backend on :8010 directly. In a container build we set
+// VITE_API_BASE=/api and nginx proxies /api to the backend (same origin).
+const client = axios.create({ baseURL: import.meta.env.VITE_API_BASE || "http://localhost:8010/api" });
+
+// Attach the JWT on every request; the workspace is resolved server-side
+// from this token, never from client-supplied data.
+client.interceptors.request.use((cfg) => {
+  const token = localStorage.getItem("ih_token");
+  if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  return cfg;
+});
+
+// On 401, drop the stale token so the app falls back to the login screen.
+client.interceptors.response.use(
+  (r) => r,
+  (err) => {
+    if (err?.response?.status === 401) localStorage.removeItem("ih_token");
+    return Promise.reject(err);
+  }
+);
+
+export const signup = (email, password, workspace_name) =>
+  client.post("/auth/signup", { email, password, workspace_name }).then((r) => r.data);
+
+export const login = (email, password) =>
+  client.post("/auth/login", { email, password }).then((r) => r.data);
+
+export const listDatasets = () => client.get("/datasets").then((r) => r.data);
+
+export const uploadDataset = (file) => {
+  const form = new FormData();
+  form.append("file", file);
+  return client.post("/datasets/upload", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }).then((r) => r.data);
+};
+
+export const loadSampleData = () => client.post("/datasets/sample").then((r) => r.data);
+
+export const exportDatasetCsv = (datasetId, name) =>
+  client.get(`/datasets/${datasetId}/export.csv`, { responseType: "blob" }).then((r) => {
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name || "dataset"}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+export const getSchema = (id) => client.get(`/datasets/${id}/schema`).then((r) => r.data);
+
+export const overrideColumn = (id, col, role, subtype) =>
+  client.patch(`/datasets/${id}/schema/${col}`, { role, subtype }).then((r) => r.data);
+
+export const getDashboard = (id, params) =>
+  client.get(`/datasets/${id}/dashboard`, { params }).then((r) => r.data);
+
+export const ask = (question) => client.post("/ask", { question }).then((r) => r.data);
+
+export const queryData = (datasetId, question) =>
+  client.post(`/datasets/${datasetId}/query`, { question }).then((r) => r.data);
+
+export const getScatter = (datasetId, params) =>
+  client.get(`/datasets/${datasetId}/scatter`, { params }).then((r) => r.data);
+
+export const getNarrative = (datasetId) =>
+  client.post(`/datasets/${datasetId}/narrative`).then((r) => r.data);
+
+export const getExplain = (datasetId, measure) =>
+  client.get(`/datasets/${datasetId}/explain`, { params: measure ? { measure } : {} }).then((r) => r.data);
+
+// --- Multi-table joins ---
+export const suggestJoin = (left, right) =>
+  client.get("/joins/suggest", { params: { left, right } }).then((r) => r.data);
+
+export const listJoins = () => client.get("/joins").then((r) => r.data);
+
+export const createJoin = (body) => client.post("/joins", body).then((r) => r.data);
+
+export const rebuildJoin = (relationId) =>
+  client.post(`/joins/${relationId}/rebuild`).then((r) => r.data);
+
+export const deleteJoin = (relationId) =>
+  client.delete(`/joins/${relationId}`).then((r) => r.data);
+
+export const getQuality = (datasetId) =>
+  client.get(`/datasets/${datasetId}/quality`).then((r) => r.data);
+
+export const applyClean = (datasetId, action, column) =>
+  client.post(`/datasets/${datasetId}/clean`, { action, column }).then((r) => r.data);
+
+export const appendData = (id, file, mode) => {
+  const form = new FormData();
+  form.append("file", file);
+  form.append("mode", mode);
+  return client.post(`/datasets/${id}/append`, form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  }).then((r) => r.data);
+};
+
+export const getBatches = (id) => client.get(`/datasets/${id}/batches`).then((r) => r.data);
+
+export const rollbackBatch = (id, batchId) =>
+  client.post(`/datasets/${id}/rollback`, { batch_id: batchId }).then((r) => r.data);
+
+// --- Live data sources (connect a URL / Google Sheet that stays in sync) ---
+export const listSources = () => client.get("/sources").then((r) => r.data);
+
+export const createSource = (name, kind, url, refresh_interval_minutes) =>
+  client.post("/sources", { name, kind, url, refresh_interval_minutes }).then((r) => r.data);
+
+export const syncSource = (sourceId) =>
+  client.post(`/sources/${sourceId}/sync`).then((r) => r.data);
+
+export const deleteSource = (sourceId) =>
+  client.delete(`/sources/${sourceId}`).then((r) => r.data);
+
+// --- Saved & customizable dashboard views ---
+export const listViews = (datasetId) =>
+  client.get(`/datasets/${datasetId}/views`).then((r) => r.data);
+
+export const createView = (datasetId, name, config, make_default = false) =>
+  client.post(`/datasets/${datasetId}/views`, { name, config, make_default }).then((r) => r.data);
+
+export const updateView = (viewId, patch) =>
+  client.patch(`/views/${viewId}`, patch).then((r) => r.data);
+
+export const deleteView = (viewId) =>
+  client.delete(`/views/${viewId}`).then((r) => r.data);
+
+// --- Public share links (read-only dashboard links) ---
+export const listShares = (datasetId) =>
+  client.get(`/datasets/${datasetId}/shares`).then((r) => r.data);
+
+export const createShare = (datasetId, body) =>
+  client.post(`/datasets/${datasetId}/shares`, body).then((r) => r.data);
+
+export const revokeShare = (token) =>
+  client.delete(`/shares/${token}`).then((r) => r.data);
+
+// public: no auth required (the token is the capability)
+export const getPublicDashboard = (token) =>
+  client.get(`/public/${token}/dashboard`).then((r) => r.data);
+
+// --- Threshold alerts (webhook delivery) ---
+export const listAlerts = (datasetId) =>
+  client.get(`/datasets/${datasetId}/alerts`).then((r) => r.data);
+
+export const createAlert = (datasetId, body) =>
+  client.post(`/datasets/${datasetId}/alerts`, body).then((r) => r.data);
+
+export const setAlertEnabled = (alertId, enabled) =>
+  client.patch(`/alerts/${alertId}`, { enabled }).then((r) => r.data);
+
+export const testAlert = (alertId) =>
+  client.post(`/alerts/${alertId}/test`).then((r) => r.data);
+
+export const deleteAlert = (alertId) =>
+  client.delete(`/alerts/${alertId}`).then((r) => r.data);
+
+// --- Certified metrics (semantic layer) ---
+export const listMetrics = (datasetId) =>
+  client.get(`/datasets/${datasetId}/metrics`).then((r) => r.data);
+
+export const createMetric = (datasetId, body) =>
+  client.post(`/datasets/${datasetId}/metrics`, body).then((r) => r.data);
+
+export const deleteMetric = (metricId) =>
+  client.delete(`/metrics/${metricId}`).then((r) => r.data);
+
+// --- Team members & roles ---
+export const listMembers = () => client.get("/members").then((r) => r.data);
+
+export const addMember = (email, role, password) =>
+  client.post("/members", { email, role, password: password || null }).then((r) => r.data);
+
+export const updateMemberRole = (userId, role) =>
+  client.patch(`/members/${userId}`, { role }).then((r) => r.data);
+
+export const deleteMember = (userId) =>
+  client.delete(`/members/${userId}`).then((r) => r.data);
+
+export const changePassword = (oldPassword, newPassword) =>
+  client.post("/auth/change-password", { old_password: oldPassword, new_password: newPassword }).then((r) => r.data);
+
+// --- Billing / plans ---
+export const getBilling = () => client.get("/billing").then((r) => r.data);
+
+export const setBillingPlan = (plan) =>
+  client.post("/billing/plan", { plan }).then((r) => r.data);
+
+export const startCheckout = (plan) =>
+  client.post("/billing/checkout", {
+    plan,
+    success_url: `${window.location.origin}/?billing=success`,
+    cancel_url: `${window.location.origin}/?billing=cancel`,
+  }).then((r) => r.data);
