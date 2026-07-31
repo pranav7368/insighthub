@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createSource, deleteSource, listSources, syncSource } from "../api";
+import { createSource, deleteSource, errorText, listSources, syncSource } from "../api";
 
 const REFRESH_OPTIONS = [
   { value: 0, label: "Manual only" },
@@ -48,7 +48,7 @@ export default function ConnectSource({ onClose, onConnected }) {
         if (res?.sync?.dataset_id) onConnected?.(res.sync.dataset_id);
       }
     } catch (err) {
-      setError(err?.response?.data?.detail || "Could not connect the source.");
+      setError(errorText(err, "Could not connect the source."));
     } finally {
       setBusy(false);
     }
@@ -61,7 +61,7 @@ export default function ConnectSource({ onClose, onConnected }) {
       await load();
       if (r?.dataset_id) onConnected?.(r.dataset_id);
     } catch (err) {
-      setError(err?.response?.data?.detail || "Sync failed.");
+      setError(errorText(err, "Sync failed."));
       await load();
     } finally {
       setSyncing(null);
@@ -71,7 +71,7 @@ export default function ConnectSource({ onClose, onConnected }) {
   const remove = async (src) => {
     setError(null);
     try { await deleteSource(src.source_id); await load(); }
-    catch (err) { setError(err?.response?.data?.detail || "Could not remove the source."); }
+    catch (err) { setError(errorText(err, "Could not remove the source.")); }
   };
 
   return (

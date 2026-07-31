@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { addMember, changePassword, deleteMember, listMembers, updateMemberRole } from "../api";
+import { addMember, changePassword, deleteMember, errorText, listMembers, updateMemberRole } from "../api";
 
 const ROLES = [
   { value: "admin", label: "Admin — full control + team" },
@@ -31,7 +31,7 @@ export default function TeamDialog({ onClose }) {
       if (m.temp_password) setInvited({ email: m.email, temp_password: m.temp_password });
       load();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Could not add the member.");
+      setError(errorText(err, "Could not add the member."));
     } finally {
       setBusy(false);
     }
@@ -40,12 +40,12 @@ export default function TeamDialog({ onClose }) {
   const changeRole = async (m, newRole) => {
     setError(null);
     try { await updateMemberRole(m.user_id, newRole); load(); }
-    catch (err) { setError(err?.response?.data?.detail || "Could not change the role."); }
+    catch (err) { setError(errorText(err, "Could not change the role.")); }
   };
   const remove = async (m) => {
     setError(null);
     try { await deleteMember(m.user_id); load(); }
-    catch (err) { setError(err?.response?.data?.detail || "Could not remove the member."); }
+    catch (err) { setError(errorText(err, "Could not remove the member.")); }
   };
 
   const submitPw = async (e) => {
@@ -56,7 +56,7 @@ export default function TeamDialog({ onClose }) {
       setError(null);
       alert("Password changed.");
     } catch (err) {
-      setPw((p) => ({ ...p, note: err?.response?.data?.detail || "Could not change password." }));
+      setPw((p) => ({ ...p, note: errorText(err, "Could not change password.") }));
     }
   };
 

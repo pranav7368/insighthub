@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createMetric, deleteMetric, getSchema, listMetrics } from "../api";
+import { createMetric, deleteMetric, errorText, getSchema, listMetrics } from "../api";
 import { humanLabel } from "../format";
 
 const AGGS = [
@@ -76,7 +76,7 @@ export default function MetricsDialog({ datasetId, onClose, onChanged }) {
       load();
       onChanged?.();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Could not create the metric.");
+      setError(errorText(err, "Could not create the metric."));
     } finally {
       setBusy(false);
     }
@@ -84,7 +84,7 @@ export default function MetricsDialog({ datasetId, onClose, onChanged }) {
 
   const remove = async (m) => {
     try { await deleteMetric(m.metric_id); load(); onChanged?.(); }
-    catch (err) { setError(err?.response?.data?.detail || "Could not delete."); }
+    catch (err) { setError(errorText(err, "Could not delete.")); }
   };
 
   return (

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createJoin, deleteJoin, listJoins, rebuildJoin, suggestJoin } from "../api";
+import { createJoin, deleteJoin, errorText, listJoins, rebuildJoin, suggestJoin } from "../api";
 import { humanLabel } from "../format";
 
 export default function JoinDialog({ datasets, currentDatasetId, onClose, onCreated }) {
@@ -45,7 +45,7 @@ export default function JoinDialog({ datasets, currentDatasetId, onClose, onCrea
       load();
       if (res?.dataset_id) onCreated?.(res.dataset_id);
     } catch (err) {
-      setError(err?.response?.data?.detail || "Could not create the join.");
+      setError(errorText(err, "Could not create the join."));
     } finally {
       setBusy(false);
     }
@@ -54,12 +54,12 @@ export default function JoinDialog({ datasets, currentDatasetId, onClose, onCrea
   const rebuild = async (j) => {
     setError(null);
     try { await rebuildJoin(j.relation_id); load(); }
-    catch (err) { setError(err?.response?.data?.detail || "Rebuild failed."); }
+    catch (err) { setError(errorText(err, "Rebuild failed.")); }
   };
   const remove = async (j) => {
     setError(null);
     try { await deleteJoin(j.relation_id); load(); }
-    catch (err) { setError(err?.response?.data?.detail || "Could not delete."); }
+    catch (err) { setError(errorText(err, "Could not delete.")); }
   };
 
   return (

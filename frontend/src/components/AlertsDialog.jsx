@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createAlert, deleteAlert, getSchema, listAlerts, setAlertEnabled, testAlert } from "../api";
+import { createAlert, deleteAlert, errorText, getSchema, listAlerts, setAlertEnabled, testAlert } from "../api";
 import { humanLabel } from "../format";
 
 const AGGREGATES = [
@@ -51,7 +51,7 @@ export default function AlertsDialog({ datasetId, onClose }) {
       setForm((f) => ({ ...f, name: "", threshold: "" }));
       load();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Could not create the alert.");
+      setError(errorText(err, "Could not create the alert."));
     } finally {
       setBusy(false);
     }
@@ -60,15 +60,15 @@ export default function AlertsDialog({ datasetId, onClose }) {
   const runTest = async (a) => {
     setError(null); setNote(null);
     try { await testAlert(a.alert_id); setNote(`Test sent to “${a.name}” webhook.`); }
-    catch (err) { setError(err?.response?.data?.detail || "Webhook test failed."); }
+    catch (err) { setError(errorText(err, "Webhook test failed.")); }
   };
   const toggle = async (a) => {
     try { await setAlertEnabled(a.alert_id, !a.enabled); load(); }
-    catch (err) { setError(err?.response?.data?.detail || "Could not update the alert."); }
+    catch (err) { setError(errorText(err, "Could not update the alert.")); }
   };
   const remove = async (a) => {
     try { await deleteAlert(a.alert_id); load(); }
-    catch (err) { setError(err?.response?.data?.detail || "Could not delete the alert."); }
+    catch (err) { setError(errorText(err, "Could not delete the alert.")); }
   };
 
   return (

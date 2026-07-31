@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createView, deleteView, exportDatasetCsv, getDashboard, getExplain, getScatter, listMetrics, listViews, updateView } from "../api";
+import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getExplain, getScatter, listMetrics, listViews, updateView } from "../api";
 import { exportPdf, exportPng } from "../export";
 import KpiCard from "./KpiCard";
 import CorrelationHeatmap from "./CorrelationHeatmap";
@@ -84,22 +84,22 @@ export default function DashboardView({ datasetId }) {
       const v = await createView(datasetId, name, currentConfig(), views.length === 0);
       await reloadViews();
       setActiveViewId(v.view_id);
-    } catch (e) { setError(e?.response?.data?.detail || "Could not save the view."); }
+    } catch (e) { setError(errorText(e, "Could not save the view.")); }
   };
   const updateActiveView = async () => {
     if (!activeViewId) return;
     try { await updateView(activeViewId, { config: currentConfig() }); await reloadViews(); }
-    catch (e) { setError(e?.response?.data?.detail || "Could not update the view."); }
+    catch (e) { setError(errorText(e, "Could not update the view.")); }
   };
   const setDefaultActiveView = async () => {
     if (!activeViewId) return;
     try { await updateView(activeViewId, { is_default: true }); await reloadViews(); }
-    catch (e) { setError(e?.response?.data?.detail || "Could not set the default."); }
+    catch (e) { setError(errorText(e, "Could not set the default.")); }
   };
   const deleteActiveView = async () => {
     if (!activeViewId) return;
     try { await deleteView(activeViewId); setActiveViewId(null); await reloadViews(); }
-    catch (e) { setError(e?.response?.data?.detail || "Could not delete the view."); }
+    catch (e) { setError(errorText(e, "Could not delete the view.")); }
   };
   const toggleSection = (key) =>
     setHiddenSections((h) => (h.includes(key) ? h.filter((x) => x !== key) : [...h, key]));
@@ -171,7 +171,7 @@ export default function DashboardView({ datasetId }) {
       setDashboard(data);
       if (!activeMeasure && data.chosen_measure) setActiveMeasure(data.chosen_measure);
     } catch (err) {
-      setError(err?.response?.data?.detail || "Could not load the dashboard.");
+      setError(errorText(err, "Could not load the dashboard."));
     }
   }, [datasetId, filters, dateFrom, dateTo, activeMeasure]);
 

@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { errorText } from "../api";
 
 export default function UploadButton({ onUpload, label = "+ Upload data", primary = false }) {
   const inputRef = useRef(null);
@@ -14,7 +15,7 @@ export default function UploadButton({ onUpload, label = "+ Upload data", primar
     try {
       await onUpload(file);
     } catch (err) {
-      setError(err?.response?.data?.detail || "Upload failed");
+      setError(errorText(err, "Upload failed"));
     } finally {
       setBusy(false);
     }

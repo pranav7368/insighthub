@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { getDashboard } from "../api";
+import { errorText, getDashboard } from "../api";
 import ComparisonChart from "./ComparisonChart";
 import { formatNumber, humanLabel } from "../format";
 
@@ -53,7 +53,7 @@ export default function ComparePane({ datasetId }) {
       const [a, b] = await Promise.all([getDashboard(datasetId, fa), getDashboard(datasetId, fb)]);
       setResult({ a, b, labelA, labelB });
     } catch (e) {
-      setError(e?.response?.data?.detail || "Comparison failed.");
+      setError(errorText(e, "Comparison failed."));
     } finally {
       setBusy(false);
     }

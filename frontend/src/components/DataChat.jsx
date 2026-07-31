@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { queryData } from "../api";
+import { errorText, queryData } from "../api";
 import ResultChart from "./ResultChart";
 
 function ComputedFrom({ result }) {
@@ -60,7 +60,7 @@ export default function DataChat({ datasetId }) {
       const result = await queryData(datasetId, text);
       setHistory((h) => [{ question: text, result }, ...h]);
     } catch (err) {
-      setHistory((h) => [{ question: text, error: err?.response?.data?.detail || "Request failed" }, ...h]);
+      setHistory((h) => [{ question: text, error: errorText(err, "Request failed") }, ...h]);
     } finally {
       setBusy(false);
     }
