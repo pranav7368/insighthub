@@ -196,6 +196,23 @@ export const createMetric = (datasetId, body) =>
 export const deleteMetric = (metricId) =>
   client.delete(`/metrics/${metricId}`).then((r) => r.data);
 
+// --- Row-level security (admin) ---
+export const listRlsRules = (datasetId) =>
+  client.get(`/datasets/${datasetId}/rls`).then((r) => r.data);
+
+export const createRlsRule = (datasetId, body) =>
+  client.post(`/datasets/${datasetId}/rls`, body).then((r) => r.data);
+
+export const deleteRlsRule = (ruleId) =>
+  client.delete(`/rls/${ruleId}`).then((r) => r.data);
+
+// --- PII masking policy (admin) ---
+export const getPrivacy = (datasetId) =>
+  client.get(`/datasets/${datasetId}/privacy`).then((r) => r.data);
+
+export const setPrivacy = (datasetId, body) =>
+  client.patch(`/datasets/${datasetId}/privacy`, body).then((r) => r.data);
+
 // --- Team members & roles ---
 export const listMembers = () => client.get("/members").then((r) => r.data);
 

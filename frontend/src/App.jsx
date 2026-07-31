@@ -4,6 +4,7 @@ import Login from "./components/Login";
 import UploadButton from "./components/UploadButton";
 import ConnectSource from "./components/ConnectSource";
 import TemplateGallery from "./components/TemplateGallery";
+import AccessDialog from "./components/AccessDialog";
 import ShareDialog from "./components/ShareDialog";
 import AlertsDialog from "./components/AlertsDialog";
 import MetricsDialog from "./components/MetricsDialog";
@@ -42,6 +43,7 @@ export default function App() {
   const [showUpdate, setShowUpdate] = useState(false);
   const [showConnect, setShowConnect] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [showAccess, setShowAccess] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
   const [showMetrics, setShowMetrics] = useState(false);
@@ -178,6 +180,9 @@ export default function App() {
                 )}
                 <button role="menuitem" onClick={runFromMenu(() => setShowShare(true))}>Share dashboard</button>
                 <button role="menuitem" onClick={runFromMenu(() => setShowAlerts(true))}>Alerts</button>
+                {isAdmin && (
+                  <button role="menuitem" onClick={runFromMenu(() => setShowAccess(true))}>Access &amp; privacy</button>
+                )}
                 <button role="menuitem" onClick={runFromMenu(() => setShowUpdate(true))}>Update data</button>
                 <button role="menuitem" onClick={runFromMenu(openSchema)}>Review columns</button>
                 <button role="menuitem" onClick={runFromMenu(() => setShowQuality(true))}>Data quality</button>
@@ -248,6 +253,13 @@ export default function App() {
           currentDatasetId={datasetId}
           onClose={() => setShowJoin(false)}
           onCreated={(newId) => { handleConnected(newId); setShowJoin(false); }}
+        />
+      )}
+      {showAccess && datasetId && (
+        <AccessDialog
+          datasetId={datasetId}
+          datasetName={structuredDatasets.find((d) => d.dataset_id === datasetId)?.name || "dataset"}
+          onClose={() => setShowAccess(false)}
         />
       )}
       {showTeam && <TeamDialog onClose={() => setShowTeam(false)} />}

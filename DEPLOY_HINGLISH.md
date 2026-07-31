@@ -57,7 +57,9 @@ InsightHub/
 │   │   │   ├── sharing.py       # public share links
 │   │   │   ├── alerts.py        # threshold alerts (webhook)
 │   │   │   ├── semantic.py      # certified metrics (show-the-SQL)
-│   │   │   └── drivers.py       # "What changed" root-cause analysis
+│   │   │   ├── drivers.py       # "What changed" root-cause analysis
+│   │   │   ├── rls.py           # row-level security (kis member ko kaun si rows)
+│   │   │   └── privacy.py       # PII detect + masking (email/phone chhupana)
 │   │   ├── ingest/             # data andar laane ka kaam
 │   │   │   ├── pipeline.py      # upload -> parse -> table banana
 │   │   │   ├── parsers.py       # csv/xlsx/pdf/docx padhna
@@ -71,7 +73,7 @@ InsightHub/
 │   │   ├── billing.py           # plans + quota (plan gating)
 │   │   ├── billing_stripe.py    # Stripe checkout + webhook
 │   │   └── members.py           # team members + roles (admin/editor/viewer)
-│   ├── tests/                   # 266 tests (pytest)
+│   ├── tests/                   # 322 tests (pytest)
 │   └── scripts/                 # sample data generator
 │
 └── frontend/                    # === FRONTEND (React / Vite) ===
@@ -186,7 +188,7 @@ cd backend
 Tests chalane ke liye:
 ```bash
 cd backend
-IH_OFFLINE=1 .venv/Scripts/python -m pytest -q      # 266 tests
+IH_OFFLINE=1 .venv/Scripts/python -m pytest -q      # 322 tests
 ```
 
 ---

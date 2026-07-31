@@ -47,6 +47,8 @@ Most "AI + BI" tools hallucinate numbers. InsightHub is built so they can't:
 | **Export** | One-click **PDF** and **PNG** of the dashboard, and **CSV** of the underlying data. |
 | **Team & roles** | Invite teammates with a role — **admin** (full control + team management), **editor** (edit data & dashboards), **viewer** (read-only). Content mutations require editor+; user management is admin-only. Invites get a one-time password; members can change their own. |
 | **Billing & plans** | Optional (`IH_BILLING_ENABLED`) free/pro plan gating with per-workspace quotas (datasets / members / alerts) enforced at the create points (`402` on limit). Stripe checkout + webhook-driven subscription state, or set the plan manually for self-hosted. Off by default = unlimited. |
+| **Row-level security** | Scope what rows a *member* sees ("Priya sees only North and East"). Enforced by rewriting the dataset's table reference into a filtered subquery that every read path shares — dashboards, Ask, certified metrics, drivers, quality, CSV export, alerts — so the filter cannot be forgotten on one endpoint. Share links and alerts evaluate as their **author**, closing the obvious escape hatches. Fails closed if a rule's column disappears. |
+| **PII masking** | Sensitive columns (email / phone / ID / person name) are detected on upload by name *and* value shape, then redacted for everyone except admins — `pr***@acme.com`, `******3210` — everywhere at once, including CSV exports and public links. Applied in the SQL projection, so the stored data is never altered and masking can be lifted again from the UI. |
 | **Multi-tenant** | Signup/login (JWT), per-workspace data isolation, audit log. |
 
 ## Architecture
@@ -165,7 +167,7 @@ backend/
     analytics/              detect · engine · intelligence · correlation · quality · nlquery · narrative
     qa/                     llm (multi-provider + offline) · engine · gates
     prompts/                reviewable plain-text LLM prompts
-  tests/                    266 tests (pytest)
+  tests/                    322 tests (pytest)
   scripts/make_sample_data.py
 frontend/
   src/
@@ -178,7 +180,7 @@ run.sh · run.ps1 · .env.example
 
 ```bash
 cd backend
-IH_OFFLINE=1 .venv/Scripts/python -m pytest -q     # 266 tests, no network/keys needed
+IH_OFFLINE=1 .venv/Scripts/python -m pytest -q     # 322 tests, no network/keys needed
 ```
 
 Covers: SQL-injection defense, tenant isolation, per-format ingestion,

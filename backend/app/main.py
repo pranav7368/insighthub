@@ -36,6 +36,7 @@ from .analytics.drivers import DriverError, explain_change
 from .analytics.rls import (
     RuleError, RuleNotFound, create_rule, delete_rule, list_rules, secured_relation,
 )
+from .analytics.privacy import KINDS as PII_KINDS, list_policies, set_policy
 from .analytics.joins import (
     JoinError, RelationNotFound, create_join, delete_relation, list_relations,
     rebuild_join, suggest_join_keys,
@@ -918,6 +919,47 @@ def remove_rls_rule(rule_id: str, principal: Principal = Depends(require_admin))
         raise HTTPException(status_code=404, detail="rule not found")
     db.audit(con, principal.workspace_id, principal.user_id, "rls_delete", rule_id)
     return {"ok": True}
+
+
+# --------------------------------------------------------- PII policy ----
+
+class PolicyBody(BaseModel):
+    column_name: str
+    masked: bool
+    pii_kind: str | None = None
+
+
+@app.get("/api/datasets/{dataset_id}/privacy")
+def get_privacy(dataset_id: str, principal: Principal = Depends(require_admin)):
+    """Which columns are treated as PII and whether they are masked. Admin-only
+    — this is the list of what is sensitive about the data."""
+    con = db.connect()
+    try:
+        get_dataset(con, principal.workspace_id, dataset_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    return list_policies(con, principal.workspace_id, dataset_id)
+
+
+@app.patch("/api/datasets/{dataset_id}/privacy")
+def set_privacy(dataset_id: str, body: PolicyBody, principal: Principal = Depends(require_admin)):
+    """Turn masking on or off for one column. The underlying values are never
+    rewritten, so this is reversible at any time."""
+    con = db.connect()
+    try:
+        get_dataset(con, principal.workspace_id, dataset_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    known = {c.name for c in get_columns(con, principal.workspace_id, dataset_id)}
+    if body.column_name not in known:
+        raise HTTPException(status_code=400, detail=f"unknown column {body.column_name!r}")
+    if body.pii_kind is not None and body.pii_kind not in PII_KINDS:
+        raise HTTPException(status_code=400, detail="invalid pii kind")
+    set_policy(con, principal.workspace_id, dataset_id, body.column_name,
+               body.pii_kind, body.masked)
+    db.audit(con, principal.workspace_id, principal.user_id,
+             "privacy_mask" if body.masked else "privacy_unmask", body.column_name)
+    return list_policies(con, principal.workspace_id, dataset_id)
 
 
 @app.get("/api/datasets/{dataset_id}/schema")

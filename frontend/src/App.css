@@ -881,3 +881,53 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 @media (max-width: 480px) {
   .tour__card { left: 12px !important; width: calc(100vw - 24px) !important; }
 }
+
+/* ===== Access & privacy dialog ===== */
+.access-note { font-size: 12px; color: var(--text-muted); margin: 0 0 var(--sp-3); }
+.access-section { margin-top: var(--sp-6); }
+.access-form {
+  display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center;
+  margin-bottom: var(--sp-3); padding: var(--sp-3);
+  background: var(--surface-2); border-radius: var(--radius);
+}
+.access-form select, .access-form input {
+  padding: 7px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface-1); color: var(--text-primary); font: inherit; font-size: 13px;
+}
+.access-form input { flex: 1; min-width: 140px; }
+.access-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.access-table th {
+  text-align: left; padding: 6px 8px; font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+.access-table td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.access-table code {
+  background: var(--surface-2); padding: 1px 6px; border-radius: 5px; font-size: 12px;
+}
+.access-actions { text-align: right; white-space: nowrap; }
+.access-actions button {
+  padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--surface-1); color: var(--text-primary); cursor: pointer; font-size: 12px;
+  transition: border-color var(--transition);
+}
+.access-actions button:hover { border-color: var(--series-1); }
+.access-empty {
+  padding: var(--sp-4); border: 1px dashed var(--border); border-radius: var(--radius);
+  color: var(--text-muted); font-size: 13px; text-align: center;
+}
+.access-more { margin-top: var(--sp-3); }
+.access-more summary {
+  cursor: pointer; font-size: 13px; color: var(--text-secondary); padding: 6px 0;
+}
+.access-more__list { display: flex; flex-direction: column; gap: 6px; padding-top: var(--sp-2); }
+.access-more__row { display: flex; align-items: center; gap: var(--sp-3); }
+.access-more__row select {
+  margin-left: auto; padding: 5px 8px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface-1);
+  color: var(--text-primary); font: inherit; font-size: 12px;
+}
+@media (max-width: 560px) {
+  .access-form { flex-direction: column; align-items: stretch; }
+  .access-table { display: block; overflow-x: auto; }
+}

@@ -31,6 +31,7 @@ import json
 from ..core.security import new_id
 from ..core.sqlsafe import UnsafeIdentifierError, safe_identifier, safe_table_name
 from .engine import get_columns, get_dataset
+from .privacy import mask_projection
 
 OPERATORS = ("in", "not_in")
 MAX_VALUES = 200
@@ -163,18 +164,40 @@ def build_predicate(con, workspace_id: str, user_id: str | None,
     return " AND ".join(clauses), params
 
 
+def _is_admin(con, workspace_id: str, user_id: str | None) -> bool:
+    """Admins see unmasked values. Looked up here rather than threaded through
+    every caller: a read path cannot accidentally omit the role and unmask."""
+    if not user_id:
+        return True          # system/internal callers (no member context)
+    row = con.execute("SELECT role FROM users WHERE user_id = ? AND workspace_id = ?",
+                      [user_id, workspace_id]).fetchone()
+    return bool(row) and row[0] == "admin"
+
+
 def secured_relation(con, workspace_id: str, user_id: str | None, dataset: dict) -> tuple[str, list]:
     """The relation every read path should SELECT FROM, plus its bound params.
 
     Use this in place of `safe_table_name(dataset["table_name"])`; the returned
     params must be prepended to the query's own params, because the subquery
     appears before any outer WHERE in the SQL text.
+
+    It applies BOTH protections, so a caller gets them together or not at all:
+    row-level rules become the WHERE, and PII masking becomes a REPLACE over
+    the projection.
     """
     table = safe_table_name(dataset["table_name"])
-    where, params = build_predicate(con, workspace_id, user_id, dataset["dataset_id"])
-    if not where:
+    dataset_id = dataset["dataset_id"]
+    where, params = build_predicate(con, workspace_id, user_id, dataset_id)
+
+    projection = ""
+    if not _is_admin(con, workspace_id, user_id):
+        allowed = {c.name for c in get_columns(con, workspace_id, dataset_id)}
+        projection = mask_projection(con, workspace_id, dataset_id, allowed)
+
+    if not where and not projection:
         return table, []
-    return f"(SELECT * FROM {table} WHERE {where})", params
+    clause = f" WHERE {where}" if where else ""
+    return f"(SELECT *{projection} FROM {table}{clause})", params
 
 
 def restricts(con, workspace_id: str, user_id: str | None, dataset_id: str) -> bool:
