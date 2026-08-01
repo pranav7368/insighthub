@@ -73,7 +73,7 @@ InsightHub/
 │   │   ├── billing.py           # plans + quota (plan gating)
 │   │   ├── billing_stripe.py    # Stripe checkout + webhook
 │   │   └── members.py           # team members + roles (admin/editor/viewer)
-│   ├── tests/                   # 483 tests (pytest)
+│   ├── tests/                   # 497 tests (pytest)
 │   └── scripts/                 # sample data generator
 │
 └── frontend/                    # === FRONTEND (React / Vite) ===
@@ -188,7 +188,7 @@ cd backend
 Tests chalane ke liye:
 ```bash
 cd backend
-IH_OFFLINE=1 .venv/Scripts/python -m pytest -q      # 483 tests
+IH_OFFLINE=1 .venv/Scripts/python -m pytest -q      # 497 tests
 ```
 
 ---
@@ -214,7 +214,24 @@ frontend URL).
 - traffic ko frontend container (:8080) pe bheje,
 - `IH_TRUST_PROXY=1` set ho (taaki rate-limiting sahi client IP dekhe).
 
-**4. Postgres backup:** data `pgdata` docker volume mein hai. Regular backup lo:
+**4. Backup (zaroori):** built-in tool dono storage backends pe same chalta hai
+— DuckDB file ho ya Postgres:
+```bash
+# roz raat ka backup + purane hata do
+python scripts/backup.py create /backups/insighthub
+python scripts/backup.py prune  /backups/insighthub --keep 14
+
+# archive padha ja sakta hai ya nahi — ye bhi schedule pe chalao
+python scripts/backup.py verify /backups/insighthub/<folder>
+
+# wapas laane ke liye (confirmation maangta hai)
+python scripts/backup.py restore /backups/insighthub/<folder>
+```
+Restore CI mein har baar test hota hai, isliye "restore ho jayega" ek tested
+baat hai, umeed nahi. Backup folder ko encrypt karo — warna baaki security ka
+fayda nahi.
+
+Sirf Postgres ka raw dump chahiye to:
 ```bash
 docker exec insighthub-db-1 pg_dump -U insighthub insighthub > backup.sql
 ```

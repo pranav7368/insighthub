@@ -31,9 +31,10 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Security headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` | `main.py` |
 | **Structured logging** | JSON, request-correlated, credential-redacted; identifiers logged, never row contents | `core/observability.py` |
 | **Schema migrations** | Versioned ledger so a released build never meets a database it cannot read | `core/migrations.py` |
+| **Backup & restore** | `scripts/backup.py` archives every table to Parquet with a manifest, verifies an archive without restoring it, and refuses an archive from a newer build. The **restore is tested on every CI run** — real data in, wiped, restored, same dashboard number out | `core/backup.py` |
 | **Accessibility** | WCAG 2.1 AA: zero axe-core violations across login, dashboard, tour and every admin dialog, in light and dark. Structural rules regression-tested in CI | `frontend/src/a11y.test.jsx` |
 
-Verified by **483 backend tests** and **75 frontend tests**, including a source-guard test that fails
+Verified by **497 backend tests** and **75 frontend tests**, including a source-guard test that fails
 if any module queries a dataset table without going through the row-level
 security rewrite.
 
@@ -60,9 +61,13 @@ an enterprise deal.** The application stores data in one of two places:
   volume it lives on. Suitable for single-tenant or evaluation deployments;
   for multi-tenant production use Postgres.
 
-**Backups inherit none of this automatically.** A `pg_dump` written to an
-unencrypted disk undoes the whole control. Encrypt backups and restrict who can
-read them.
+**Backups inherit none of this automatically.** An archive written to an
+unencrypted disk undoes the whole control. Encrypt the backup destination and
+restrict who can read it.
+
+Use `scripts/backup.py` — it works identically on both storage backends, and
+`verify` should run on a schedule, because an archive that cannot be read is
+worth discovering on an ordinary Tuesday rather than on the day you need it.
 
 **Key management** — `IH_SECRET_KEY` signs sessions. It must be a real random
 value (`python -c "import secrets; print(secrets.token_urlsafe(48))"`), stored
@@ -145,7 +150,6 @@ undisclosed is worse than finding them listed:
 * **No SOC 2 report.** Controls exist; an audit and observation window do not.
 * **Encryption at rest is deployment-dependent** (§2), not enforced by the app.
 * **Single-node storage.** No HA story for the DuckDB deployment mode.
-* **Backups are the operator's job** — no automated backup or tested restore.
 
 ---
 
