@@ -28,7 +28,10 @@ def _trim(drivers: list, n: int) -> list:
     return movers
 
 
-def explain_change(con, workspace_id, dataset_id, measure=None, dimension=None, max_drivers=6) -> dict:
+def explain_change(con, workspace_id, dataset_id, measure=None, dimension=None, max_drivers=6,
+                   user_id=None) -> dict:
+    from .rls import secured_relation
+
     dataset = get_dataset(con, workspace_id, dataset_id)
     if dataset["kind"] != "structured":
         raise DriverError("driver analysis only applies to structured datasets")
@@ -45,14 +48,15 @@ def explain_change(con, workspace_id, dataset_id, measure=None, dimension=None, 
     if not date_col:
         return {"available": False, "reason": "no date column, so periods can't be compared"}
 
-    tq = safe_table_name(dataset["table_name"])
+    tq, rls_params = secured_relation(con, workspace_id, user_id, dataset)
     mq = safe_identifier(meas, allowed)
     dq = safe_identifier(date_col, allowed)
     mexpr = _month_expr(dq)
 
     months = con.execute(
         f"SELECT {mexpr} m, sum({mq}) v FROM {tq} WHERE TRY_CAST({dq} AS TIMESTAMP) IS NOT NULL "
-        f"GROUP BY 1 ORDER BY 1"
+        f"GROUP BY 1 ORDER BY 1",
+        list(rls_params),
     ).fetchall()
     months = [(m, v) for m, v in months if m is not None]
     if len(months) < 2:
@@ -73,7 +77,7 @@ def explain_change(con, workspace_id, dataset_id, measure=None, dimension=None, 
         rows = con.execute(
             f"SELECT {mexpr} m, {gq} g, sum({mq}) v FROM {tq} "
             f"WHERE {mexpr} IN (?, ?) AND {gq} IS NOT NULL GROUP BY 1, 2",
-            [prev_m, curr_m],
+            list(rls_params) + [prev_m, curr_m],
         ).fetchall()
         agg = {}
         for m, g, v in rows:

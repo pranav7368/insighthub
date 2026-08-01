@@ -1,26 +1,9 @@
 import { useState } from "react";
-
-// Keep this label map in sync with SECTION_KEYS on the backend (views.py).
-export const SECTIONS = [
-  ["kpis", "KPI cards"],
-  ["metrics", "Certified metrics"],
-  ["drivers", "What changed"],
-  ["growth", "Growth strip"],
-  ["insights", "Key insights"],
-  ["narrative", "AI narrative"],
-  ["forecast", "Forecast"],
-  ["breakdowns", "Breakdowns"],
-  ["map", "Map"],
-  ["pareto", "Pareto (80/20)"],
-  ["treemap", "Treemap"],
-  ["correlations", "Correlations"],
-  ["distributions", "Distributions"],
-  ["profile", "Data profile"],
-];
+import { SECTIONS } from "../sections";
 
 export default function ViewsBar({
-  views, activeViewId, dirty, hiddenSections,
-  onApply, onToggleSection, onSave, onUpdate, onDelete, onSetDefault,
+  views, activeViewId, dirty, hiddenSections, arranging,
+  onApply, onToggleSection, onSave, onUpdate, onDelete, onSetDefault, onToggleArrange,
 }) {
   const [naming, setNaming] = useState(false);
   const [name, setName] = useState("");
@@ -39,6 +22,7 @@ export default function ViewsBar({
     <div className="views-bar no-export">
       <select
         className="views-select"
+        aria-label="Saved view"
         value={activeViewId || ""}
         onChange={(e) => {
           const v = views.find((x) => x.view_id === e.target.value);
@@ -73,6 +57,14 @@ export default function ViewsBar({
           <button className="views-btn views-btn--accent" type="submit">Save</button>
         </form>
       )}
+
+      <button
+        className={`views-btn views-btn--arrange${arranging ? " is-on" : ""}`}
+        onClick={onToggleArrange} aria-pressed={arranging}
+        title="Drag sections into the order you want"
+      >
+        <span aria-hidden>⇅</span> {arranging ? "Done" : "Arrange"}
+      </button>
 
       <details className="menu views-customize">
         <summary className="menu__btn">

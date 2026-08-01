@@ -34,12 +34,21 @@ def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
 
 
-def create_access_token(user_id: str, workspace_id: str, role: str) -> str:
+def create_access_token(user_id: str, workspace_id: str, role: str, epoch: int = 0) -> str:
+    """`epoch` is the user's session generation (`users.token_epoch`).
+
+    A JWT is self-contained, so there is otherwise no way to take one back: a
+    removed member, or one whose password was just reset, keeps full access
+    until the token expires. Bumping the stored epoch invalidates every token
+    issued before it, which is the cheapest correct revocation available
+    without a per-request session store.
+    """
     now = datetime.now(timezone.utc)
     payload = {
         "sub": user_id,
         "ws": workspace_id,
         "role": role,
+        "ep": epoch,
         "iat": now,
         "exp": now + timedelta(minutes=config.JWT_TTL_MINUTES),
     }

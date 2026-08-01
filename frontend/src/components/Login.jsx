@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { login, signup } from "../api";
+import { errorText, login, signup } from "../api";
 
 export default function Login({ onAuthed }) {
   const [mode, setMode] = useState("login");
@@ -22,7 +22,7 @@ export default function Login({ onAuthed }) {
       localStorage.setItem("ih_role", data.role || "admin");
       onAuthed(data.role || "admin");
     } catch (err) {
-      setError(err?.response?.data?.detail || "Something went wrong");
+      setError(errorText(err));
     } finally {
       setBusy(false);
     }
@@ -63,10 +63,16 @@ export default function Login({ onAuthed }) {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              minLength={8}
-              placeholder={mode === "signup" ? "min 8 characters" : ""}
+              minLength={10}
+              placeholder={mode === "signup" ? "at least 10 characters" : ""}
             />
           </label>
+          {mode === "signup" && !error && (
+            <div className="auth-hint">
+              A long phrase beats a short complicated one. Avoid common passwords and
+              anything containing your email or company name.
+            </div>
+          )}
           {error && <div className="auth-error">{error}</div>}
           <button className="auth-submit" disabled={busy} type="submit">
             {busy ? "Please wait…" : mode === "login" ? "Log in" : "Create workspace"}

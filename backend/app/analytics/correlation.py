@@ -72,8 +72,9 @@ def scatter_points(con, table_quoted, x, y, allowed, where_sql, params,
 
 
 def compute_scatter(con, workspace_id, dataset_id, x, y,
-                    filters=None, date_from=None, date_to=None):
+                    filters=None, date_from=None, date_to=None, user_id=None):
     from .engine import DatasetNotFound, _date_bounds, get_columns, get_dataset
+    from .rls import secured_relation
 
     dataset = get_dataset(con, workspace_id, dataset_id)
     if dataset["kind"] != "structured":
@@ -84,10 +85,10 @@ def compute_scatter(con, workspace_id, dataset_id, x, y,
     if x not in measures or y not in measures:
         raise ValueError("x and y must both be numeric measures")
 
-    table = safe_table_name(dataset["table_name"])
+    table, rls_params = secured_relation(con, workspace_id, user_id, dataset)
     date_col = next((c.name for c in columns if c.role == "date"), None)
     from_ts, to_ts = _date_bounds(date_from, date_to)
-    clauses, params = [], []
+    clauses, params = [], list(rls_params)   # RLS binds first (subquery precedes WHERE)
     for col, val in (filters or {}).items():
         if col in allowed:
             clauses.append(f"{safe_identifier(col, allowed)} = ?")

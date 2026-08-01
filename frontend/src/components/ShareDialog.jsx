@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { createShare, listShares, listViews, revokeShare } from "../api";
+import { useCallback, useEffect, useState } from "react";
+import { createShare, errorText, listShares, listViews, revokeShare } from "../api";
 
 const EXPIRY_OPTIONS = [
   { value: 0, label: "Never expires" },
@@ -20,11 +20,13 @@ export default function ShareDialog({ datasetId, onClose }) {
   const [error, setError] = useState(null);
   const [copied, setCopied] = useState(null);
 
-  const load = () => {
+  // useCallback so the effect can depend on it honestly: `load` changes
+  // only when datasetId does, which is exactly when we want to re-run.
+  const load = useCallback(() => {
     listShares(datasetId).then(setShares).catch(() => setShares([]));
     listViews(datasetId).then(setViews).catch(() => setViews([]));
-  };
-  useEffect(() => { load(); }, [datasetId]);
+  }, [datasetId]);
+  useEffect(() => { load(); }, [load]);
 
   const create = async (e) => {
     e.preventDefault();
@@ -38,7 +40,7 @@ export default function ShareDialog({ datasetId, onClose }) {
       setLabel("");
       load();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Could not create the link.");
+      setError(errorText(err, "Could not create the link."));
     } finally {
       setBusy(false);
     }
@@ -55,7 +57,7 @@ export default function ShareDialog({ datasetId, onClose }) {
   const revoke = async (share) => {
     setError(null);
     try { await revokeShare(share.token); load(); }
-    catch (err) { setError(err?.response?.data?.detail || "Could not revoke."); }
+    catch (err) { setError(errorText(err, "Could not revoke.")); }
   };
 
   const activeShares = shares.filter((s) => !s.revoked);

@@ -18,6 +18,7 @@ import duckdb
 import pandas as pd
 
 from ..analytics.detect import ColumnProfile, detect_schema
+from ..analytics.privacy import detect_pii
 from ..core import config, db
 from ..core.security import new_id
 from ..core.sqlsafe import quote_identifier, safe_table_name, sanitize_identifier
@@ -91,12 +92,38 @@ def create_structured_dataset(con, workspace_id: str, name: str, df, source_file
            VALUES (?, ?, ?, ?, 'structured', ?, ?, 0)""",
         [dataset_id, workspace_id, name, source_file, table_name, len(df)],
     )
+    # PII detection, before the roles are written: a sensitive column is never
+    # left as a measure (identifiers are not metrics, and the masked value is
+    # text, so it must stay out of aggregates).
+    # detect_pii only inspects the first 200 non-null values, so materialising
+    # the whole column wasted 266 ms on a 400k-row upload (measured). dropna()
+    # still scans, deliberately: sampling only the head would miss a column
+    # that is empty at the top and sensitive further down, and a missed PII
+    # column is an unmasked one.
+    pii = {
+        p.name: detect_pii(p.name, df[p.name].dropna().head(250).tolist()
+                           if p.name in df.columns else ())
+        # a date column can never be PII, and its values shadow phone shapes
+        if p.role != "date" else None
+        for p in profiles
+    }
+    roles = {p.name: ("ignored" if (pii[p.name] and p.role == "measure") else p.role)
+             for p in profiles}
+
     con.executemany(
         """INSERT INTO dataset_columns
            (dataset_id, workspace_id, column_name, role, subtype, distinct_count, overridden)
            VALUES (?, ?, ?, ?, ?, ?, false)""",
-        [(dataset_id, workspace_id, p.name, p.role, p.subtype, p.distinct_count) for p in profiles],
+        [(dataset_id, workspace_id, p.name, roles[p.name], p.subtype, p.distinct_count)
+         for p in profiles],
     )
+    policy_rows = [(dataset_id, workspace_id, name, kind) for name, kind in pii.items() if kind]
+    if policy_rows:      # executemany rejects an empty parameter list
+        con.executemany(
+            """INSERT INTO column_policies (dataset_id, workspace_id, column_name, pii_kind, masked)
+               VALUES (?, ?, ?, ?, true)""",
+            policy_rows,
+        )
     con.execute(
         """INSERT INTO ingest_batches
            (batch_id, dataset_id, workspace_id, source_file, mode, rows_added)

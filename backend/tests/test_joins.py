@@ -28,8 +28,8 @@ CUSTOMERS = [["customer_id", "region"],
 
 @pytest.fixture()
 def two(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_b', 'B')")
     o = ingest_upload(con, "ws_a", "orders.csv", _csv(ORDERS)).dataset_id
     c = ingest_upload(con, "ws_a", "customers.csv", _csv(CUSTOMERS)).dataset_id
     return con, "ws_a", o, c
@@ -67,7 +67,7 @@ def test_inner_join_drops_unmatched(two):
 
 def test_column_collision_is_aliased(con):
     # both tables have a non-key column named "value"
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     left = ingest_upload(con, "ws_a", "l.csv", _csv([["k", "value"], ["1", "10"]])).dataset_id
     right = ingest_upload(con, "ws_a", "r.csv", _csv([["k", "value"], ["1", "99"]])).dataset_id
     res = create_join(con, "ws_a", left, right, "k", "k", "left")
@@ -103,7 +103,7 @@ def test_rebuild_reflects_new_source_rows(two):
     rel = create_join(con, ws, o, c, "customer_id", "customer_id", "inner")
     assert rel["row_count"] == 3
     # add a customer for c9, then a matching order already exists → rebuild picks it up
-    con.execute("INSERT INTO workspaces VALUES ('x','x',now())")  # noop keep ids distinct
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('x', 'x')")  # noop keep ids distinct
     from app.ingest.append import append_to_dataset
     append_to_dataset(con, ws, c, "more.csv", _csv([["customer_id", "region"], ["c9", "West"]]))
     out = rebuild_join(con, ws, rel["relation_id"])

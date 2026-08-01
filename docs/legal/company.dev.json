@@ -1,0 +1,55 @@
+{
+  "_comment": [
+    "DEVELOPMENT PLACEHOLDERS. Not real. Never publish anything built from",
+    "this file.",
+    "",
+    "Use it to see the legal pages rendered while building and testing --",
+    "linking them from a footer, checking they read well, screenshotting a",
+    "demo -- without needing a lawyer or your registered company details yet.",
+    "",
+    "    python scripts/build_legal.py --dev",
+    "",
+    "Every value is deliberately, obviously fake. Email addresses use the",
+    "reserved .invalid domain (RFC 2606), which can never be registered, so a",
+    "stray form or script cannot mail a real person by accident.",
+    "",
+    "The publish gate (--check) ALWAYS fails on this file, whatever it",
+    "contains, so these values cannot become your live policy by being left",
+    "in place. Fill company.json for that."
+  ],
+
+  "COMPANY_LEGAL_NAME": "EXAMPLE TEST COMPANY — NOT A REAL ENTITY",
+  "PRODUCT_NAME": "InsightHub",
+  "COMPANY_ADDRESS": "1 Example Street, Test City 000000 (placeholder address)",
+  "COMPANY_COUNTRY": "India",
+  "COMPANY_REGISTRATION": "PLACEHOLDER-CIN-0000000000",
+
+  "CONTACT_EMAIL": "hello@example.invalid",
+  "PRIVACY_EMAIL": "privacy@example.invalid",
+  "SECURITY_EMAIL": "security@example.invalid",
+  "GRIEVANCE_OFFICER_NAME": "Placeholder Name (no officer appointed yet)",
+  "GRIEVANCE_OFFICER_EMAIL": "grievance@example.invalid",
+
+  "WEBSITE": "https://example.invalid",
+  "SERVICE_URL": "https://app.example.invalid",
+
+  "GOVERNING_LAW": "India",
+  "JURISDICTION_CITY": "Test City",
+
+  "HOSTING_PROVIDER": "Local development machine",
+  "DATA_LOCATION": "a developer laptop",
+
+  "LLM_PROVIDER": "none (offline mode)",
+  "ERROR_TRACKING": "none",
+  "PAYMENT_PROCESSOR": "Stripe, Inc. (test mode)",
+  "EMAIL_PROVIDER": "none",
+
+  "RETENTION_AUDIT_DAYS": "not configured in development",
+  "RETENTION_DATA_DAYS": "not configured in development",
+  "RETENTION_AFTER_TERMINATION_DAYS": "30",
+
+  "SUPPORT_HOURS": "No support commitment in development",
+  "TRIAL_DAYS": "No trial configured",
+  "EFFECTIVE_DATE": "NOT IN EFFECT — development draft",
+  "LAST_UPDATED": "development build"
+}

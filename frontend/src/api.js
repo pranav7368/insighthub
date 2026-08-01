@@ -21,6 +21,24 @@ client.interceptors.response.use(
   }
 );
 
+/**
+ * A displayable message from an axios error.
+ *
+ * FastAPI answers a handled failure with a string `detail`, but a request that
+ * fails schema validation (422) answers with a *list* of error objects —
+ * rendering that straight into JSX throws "Objects are not valid as a React
+ * child" and takes the page down. Always funnel API errors through here.
+ */
+export function errorText(err, fallback = "Something went wrong") {
+  const detail = err?.response?.data?.detail;
+  if (typeof detail === "string" && detail) return detail;
+  if (Array.isArray(detail)) {
+    const msgs = detail.map((d) => d?.msg).filter(Boolean);
+    if (msgs.length) return msgs.join("; ");
+  }
+  return fallback;
+}
+
 export const signup = (email, password, workspace_name) =>
   client.post("/auth/signup", { email, password, workspace_name }).then((r) => r.data);
 
@@ -38,6 +56,12 @@ export const uploadDataset = (file) => {
 };
 
 export const loadSampleData = () => client.post("/datasets/sample").then((r) => r.data);
+
+// --- Industry templates (dataset + certified metrics + arranged default view) ---
+export const listTemplates = () => client.get("/templates").then((r) => r.data);
+
+export const loadTemplate = (templateId) =>
+  client.post("/datasets/template", { template_id: templateId }).then((r) => r.data);
 
 export const exportDatasetCsv = (datasetId, name) =>
   client.get(`/datasets/${datasetId}/export.csv`, { responseType: "blob" }).then((r) => {
@@ -171,6 +195,68 @@ export const createMetric = (datasetId, body) =>
 
 export const deleteMetric = (metricId) =>
   client.delete(`/metrics/${metricId}`).then((r) => r.data);
+
+// --- Account security: two-factor, sessions, personal data ---
+export const getMfaStatus = () => client.get("/auth/mfa").then((r) => r.data);
+
+export const startMfaSetup = () => client.post("/auth/mfa/setup").then((r) => r.data);
+
+export const enableMfa = (code) =>
+  client.post("/auth/mfa/enable", { code }).then((r) => r.data);
+
+export const disableMfa = (password) =>
+  client.post("/auth/mfa/disable", { password }).then((r) => r.data);
+
+export const revokeSessions = () =>
+  client.post("/auth/revoke-sessions").then((r) => r.data);
+
+export const downloadMyData = () =>
+  client.get("/privacy/export/me", { responseType: "blob" }).then((r) => {
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "my-data.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
+// --- Row-level security (admin) ---
+export const listRlsRules = (datasetId) =>
+  client.get(`/datasets/${datasetId}/rls`).then((r) => r.data);
+
+export const createRlsRule = (datasetId, body) =>
+  client.post(`/datasets/${datasetId}/rls`, body).then((r) => r.data);
+
+export const deleteRlsRule = (ruleId) =>
+  client.delete(`/rls/${ruleId}`).then((r) => r.data);
+
+// --- Workspace security (admin) ---
+export const getWorkspaceSecurity = () =>
+  client.get("/workspace/security").then((r) => r.data);
+
+export const setWorkspaceSecurity = (require_mfa) =>
+  client.put("/workspace/security", { require_mfa }).then((r) => r.data);
+
+// --- Retention (admin, workspace-wide) ---
+export const getRetention = () => client.get("/privacy/retention").then((r) => r.data);
+
+export const previewRetention = (body) =>
+  client.post("/privacy/retention/preview", body).then((r) => r.data);
+
+export const setRetention = (body) =>
+  client.put("/privacy/retention", body).then((r) => r.data);
+
+export const runRetention = () =>
+  client.post("/privacy/retention/run").then((r) => r.data);
+
+// --- PII masking policy (admin) ---
+export const getPrivacy = (datasetId) =>
+  client.get(`/datasets/${datasetId}/privacy`).then((r) => r.data);
+
+export const setPrivacy = (datasetId, body) =>
+  client.patch(`/datasets/${datasetId}/privacy`, body).then((r) => r.data);
 
 // --- Team members & roles ---
 export const listMembers = () => client.get("/members").then((r) => r.data);

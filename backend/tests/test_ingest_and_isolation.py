@@ -63,8 +63,8 @@ def test_dashboard_computes_kpis(con, workspace):
 # ---------------------------------------------- TENANT ISOLATION ---------
 
 def test_tenant_cannot_read_another_tenants_dashboard(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_b', 'B')")
     a = ingest_upload(con, "ws_a", "sales.csv", csv_bytes(SALES))
 
     # tenant B asking for tenant A's dataset_id must be refused
@@ -75,8 +75,8 @@ def test_tenant_cannot_read_another_tenants_dashboard(con):
 
 
 def test_qa_only_sees_own_workspace_chunks(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_b', 'B')")
     ingest_upload(con, "ws_a", "secret.txt",
                   b"The launch code for project atlas is codename bluewhale seventeen.")
 

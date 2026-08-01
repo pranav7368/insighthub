@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { appendData, getBatches, rollbackBatch } from "../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { appendData, errorText, getBatches, rollbackBatch } from "../api";
 
 export default function UpdateData({ datasetId, datasetName, onClose, onChanged }) {
   const [mode, setMode] = useState("append");
@@ -10,8 +10,11 @@ export default function UpdateData({ datasetId, datasetName, onClose, onChanged 
   const [undoing, setUndoing] = useState(null);
   const inputRef = useRef(null);
 
-  const loadBatches = () => getBatches(datasetId).then(setBatches).catch(() => {});
-  useEffect(() => { loadBatches(); }, [datasetId]);
+  const loadBatches = useCallback(
+    () => getBatches(datasetId).then(setBatches).catch(() => {}),
+    [datasetId],
+  );
+  useEffect(() => { loadBatches(); }, [loadBatches]);
 
   const pickFile = async (e) => {
     const file = e.target.files?.[0];
@@ -24,7 +27,7 @@ export default function UpdateData({ datasetId, datasetName, onClose, onChanged 
       await loadBatches();
       onChanged?.();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Update failed");
+      setError(errorText(err, "Update failed"));
     } finally {
       setBusy(false);
     }
@@ -38,7 +41,7 @@ export default function UpdateData({ datasetId, datasetName, onClose, onChanged 
       setResult(null);
       onChanged?.();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Undo failed");
+      setError(errorText(err, "Undo failed"));
     } finally {
       setUndoing(null);
     }

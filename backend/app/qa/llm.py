@@ -313,13 +313,65 @@ def _offline_nl_query(payload: dict) -> dict:
     if metric is None:
         if "sales" in q or "revenue" in q:
             metric = next((m for m in measures if "revenue" in m.lower() or "sales" in m.lower()), None)
-    if metric is None and measures:
+
+    # Words that mean "count the rows" rather than "aggregate a column".
+    _ROW_WORDS = ("record", "records", "row", "rows", "entry", "entries", "transaction",
+                  "transactions", "order", "orders", "line items")
+    asks_for_rows = any(w in q for w in _ROW_WORDS)
+
+    # Everything the schema knows about, as words.
+    vocabulary = set()
+    for name in measures + dim_names:
+        vocabulary.update(tokens(name))
+    for d in dims:
+        for v in d.get("example_values", []):
+            vocabulary.update(tokens(str(v)))
+
+    # (1) An unresolved ENTITY: "revenue for Antarctica" when no such region
+    # exists. The reliable signal is a capitalised word mid-sentence — people
+    # capitalise names, not verbs. A lowercase content-word scan cannot tell
+    # "Antarctica" from "sold" and refuses ordinary English.
+    original = payload.get("question") or ""
+    proper_nouns = _re.findall(r"(?<![.!?]\s)(?<!^)\b([A-Z][A-Za-z]{2,})\b", original)
+    unresolved = [
+        w for w in proper_nouns
+        if not any(t in vocabulary for t in tokens(w))
+    ]
+
+    # (2) An unresolved MEASURE: "total profit margin" with no profit column.
+    # Only consulted when nothing matched, so ordinary phrasing is unaffected.
+    if metric is None and not asks_for_rows:
+        _STOPWORDS = {
+            "the", "what", "which", "who", "how", "much", "many", "and", "for", "from",
+            "with", "was", "were", "are", "is", "did", "does", "our", "all", "show",
+            "give", "tell", "get", "total", "sum", "average", "avg", "mean", "count",
+            "number", "highest", "lowest", "best", "worst", "top", "bottom", "over",
+            "per", "each", "there", "this", "that", "have", "has", "had", "into",
+            "value", "values", "data", "dataset", "amount", "please", "across",
+            "sold", "came", "made", "spent", "earned", "generated", "achieved",
+            # time language: handled by date filters, never a measure
+            "time", "month", "months", "monthly", "year", "years", "yearly", "week",
+            "weeks", "weekly", "daily", "trend", "quarter", "quarters", "last", "first",
+            "recent", "period", "date", "dates", "today", "yesterday", "ytd", "mtd",
+        } | set(_ROW_WORDS)
+        candidates = [
+            t for t in _re.split(r"[^a-z0-9]+", q)
+            if len(t) >= 4 and t not in _STOPWORDS and t not in vocabulary
+        ]
+        if candidates:
+            # hand it to the validator, which refuses naming what IS available
+            metric = candidates[0]
+
+    if metric is None and measures and not asks_for_rows:
         metric = measures[0]
 
     # aggregation
     if any(w in q for w in ("average", "avg", "mean")):
         agg = "avg"
-    elif any(w in q for w in ("how many", "number of", "count")):
+    elif asks_for_rows and any(w in q for w in ("how many", "number of", "count")):
+        # "how many orders" counts rows; "how many units" sums the units column
+        agg = "count"
+    elif metric is None and any(w in q for w in ("how many", "number of", "count")):
         agg = "count"
     elif any(w in q for w in ("minimum", "min ")):
         agg = "min"
@@ -356,8 +408,20 @@ def _offline_nl_query(payload: dict) -> dict:
     else:
         chart = "kpi"
 
+    # Words the question used that the dataset knows nothing about; the
+    # validator turns these into a refusal rather than a confident number.
+    # Compared case-INsensitively: `unresolved` holds capitalised proper nouns
+    # while filter values are lowercased here, so a case-sensitive test would
+    # fail to clear a value that WAS matched, and refuse an answerable
+    # question. Unreachable today — the vocabulary check above already drops
+    # anything matching a dimension value — but it is one word to make correct
+    # and the guarantee should not depend on that ordering holding.
+    filter_values = {str(v).lower() for v in filters.values()}
+    unresolved = [t for t in unresolved if t.lower() not in filter_values]
+
     return {"metric": metric, "aggregation": agg, "group_by": group_by,
-            "filters": filters, "sort": sort, "limit": limit, "chart_type": chart}
+            "filters": filters, "sort": sort, "limit": limit, "chart_type": chart,
+            "unresolved": unresolved}
 
 
 class OfflineLLM:

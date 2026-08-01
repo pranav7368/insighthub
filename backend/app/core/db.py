@@ -16,11 +16,16 @@ from urllib.parse import unquote, urlparse
 import duckdb
 
 from . import config
+from .migrations import run_migrations
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
     workspace_id VARCHAR PRIMARY KEY,
     name         VARCHAR NOT NULL,
+    -- when true, a member without a second factor may reach the MFA setup
+    -- endpoints and nothing else (see api/deps.py). Enforced in one place so a
+    -- new endpoint is covered by default rather than by remembering.
+    require_mfa  BOOLEAN DEFAULT false,
     created_at   TIMESTAMP DEFAULT current_timestamp
 );
 
@@ -29,8 +34,41 @@ CREATE TABLE IF NOT EXISTS users (
     workspace_id  VARCHAR NOT NULL,
     email         VARCHAR NOT NULL UNIQUE,
     password_hash VARCHAR NOT NULL,
-    role          VARCHAR NOT NULL DEFAULT 'admin',   -- admin | viewer
+    role          VARCHAR NOT NULL DEFAULT 'admin',   -- admin | editor | viewer
+    -- session generation: bumping this invalidates every token issued earlier,
+    -- which is how a self-contained JWT gets revoked (see core/security.py)
+    token_epoch   INTEGER DEFAULT 0,
+    -- online-guessing defence, per ACCOUNT (the per-IP limiter cannot see a
+    -- distributed attack against one mailbox)
+    failed_logins INTEGER DEFAULT 0,
+    locked_until  TIMESTAMP,
+    -- second factor (TOTP). mfa_secret exists once enrolment starts; only
+    -- mfa_enabled makes it required, so a half-finished setup cannot lock
+    -- anyone out. mfa_last_step blocks replay of a code inside its window.
+    mfa_secret    VARCHAR,
+    mfa_enabled   BOOLEAN DEFAULT false,
+    mfa_last_step BIGINT,
     created_at    TIMESTAMP DEFAULT current_timestamp
+);
+
+-- Single-use recovery codes, stored hashed like any other credential. The row
+-- is deleted on use, which is what makes them single-use.
+-- Retention. Nothing expires unless a workspace sets a period: 0 means keep
+-- forever, and an unconfigured workspace is never touched. See core/retention.py
+-- for why every default here is off.
+CREATE TABLE IF NOT EXISTS retention_policies (
+    workspace_id VARCHAR PRIMARY KEY,
+    audit_days   INTEGER DEFAULT 0,
+    archive_days INTEGER DEFAULT 0,
+    dataset_days INTEGER DEFAULT 0,
+    updated_at   TIMESTAMP DEFAULT current_timestamp
+);
+
+CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
+    user_id      VARCHAR NOT NULL,
+    workspace_id VARCHAR NOT NULL,
+    code_hash    VARCHAR NOT NULL,
+    created_at   TIMESTAMP DEFAULT current_timestamp
 );
 
 CREATE TABLE IF NOT EXISTS datasets (
@@ -132,7 +170,7 @@ CREATE TABLE IF NOT EXISTS dashboard_views (
     workspace_id VARCHAR NOT NULL,
     dataset_id   VARCHAR NOT NULL,
     name         VARCHAR NOT NULL,
-    config       VARCHAR NOT NULL,      -- JSON: filters/date_from/date_to/measure/hidden_sections
+    config       VARCHAR NOT NULL,      -- JSON: filters/date_from/date_to/measure/hidden_sections/section_order
     is_default   BOOLEAN DEFAULT false,
     created_at   TIMESTAMP DEFAULT current_timestamp,
     updated_at   TIMESTAMP DEFAULT current_timestamp
@@ -173,6 +211,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     webhook_url   VARCHAR NOT NULL,
     enabled       BOOLEAN DEFAULT true,
     last_checked  TIMESTAMP,
+    created_by    VARCHAR,               -- whose row-level rules scope the evaluation
     last_value    DOUBLE,
     last_state    VARCHAR DEFAULT 'pending',  -- pending | ok | firing | error
     last_error    VARCHAR,
@@ -225,6 +264,38 @@ CREATE TABLE IF NOT EXISTS dataset_relations (
     join_type         VARCHAR NOT NULL,   -- inner | left
     created_at        TIMESTAMP DEFAULT current_timestamp
 );
+
+-- Row-level security: which rows of a dataset a given MEMBER may see. Rules
+-- bind to a user (not a role), so "Priya sees only North & East" is expressible
+-- without inventing a role per territory. Rules on the same column OR together
+-- (a widening list); rules on different columns AND together (each narrows).
+--
+-- Enforcement is in analytics/rls.py, which rewrites the dataset's table
+-- reference into a filtered subquery every read path shares. A user with no
+-- rules sees everything -- absence of a rule is not a restriction.
+CREATE TABLE IF NOT EXISTS rls_rules (
+    rule_id        VARCHAR PRIMARY KEY,
+    workspace_id   VARCHAR NOT NULL,
+    dataset_id     VARCHAR NOT NULL,
+    user_id        VARCHAR NOT NULL,
+    column_name    VARCHAR NOT NULL,
+    operator       VARCHAR NOT NULL DEFAULT 'in',  -- in | not_in
+    allowed_values VARCHAR NOT NULL,               -- JSON array of strings
+    created_at     TIMESTAMP DEFAULT current_timestamp
+);
+
+-- PII policy per column. Detected at ingest (analytics/privacy.py) and
+-- overridable by an admin. A masked column is redacted on the way OUT for
+-- everyone except admins, so the underlying data is never rewritten and the
+-- policy can be relaxed later without a re-upload.
+CREATE TABLE IF NOT EXISTS column_policies (
+    dataset_id   VARCHAR NOT NULL,
+    workspace_id VARCHAR NOT NULL,
+    column_name  VARCHAR NOT NULL,
+    pii_kind     VARCHAR,                          -- email | phone | national_id | person_name
+    masked       BOOLEAN DEFAULT true,
+    PRIMARY KEY (dataset_id, column_name)
+);
 """
 
 # Internal provenance column added to every structured raw table. Kept out of
@@ -267,6 +338,7 @@ def _connect_postgres() -> duckdb.DuckDBPyConnection:
     con.execute("USE pg")
     if not _pg_schema_ready:
         con.execute(SCHEMA)
+        run_migrations(con)
         _pg_schema_ready = True
     return con
 
@@ -284,6 +356,7 @@ def _new_connection() -> duckdb.DuckDBPyConnection:
     path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(path))
     con.execute(SCHEMA)
+    run_migrations(con)
     return con
 
 
@@ -298,6 +371,7 @@ def connect(db_path: str | Path | None = None) -> duckdb.DuckDBPyConnection:
         path.parent.mkdir(parents=True, exist_ok=True)
         con = duckdb.connect(str(path))
         con.execute(SCHEMA)
+        run_migrations(con)
         return con
 
     if not config.DB_POOL_ENABLED:

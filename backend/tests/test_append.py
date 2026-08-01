@@ -26,7 +26,7 @@ FEB = [["date", "branch", "revenue"],
 
 @pytest.fixture()
 def ds(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     res = ingest_upload(con, "ws_a", "jan.csv", _csv(JAN))
     return con, "ws_a", res.dataset_id
 
@@ -125,8 +125,8 @@ def test_batches_are_listed(ds):
 # ---- tenant isolation ----
 
 def test_cannot_append_to_another_workspace(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_b', 'B')")
     a = ingest_upload(con, "ws_a", "jan.csv", _csv(JAN))
     from app.analytics.engine import DatasetNotFound
     with pytest.raises(DatasetNotFound):

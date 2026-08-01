@@ -106,23 +106,29 @@ def revoke_share(con, workspace_id: str, token: str) -> int:
 
 
 def resolve_share(con, token: str) -> dict:
-    """PUBLIC lookup: {workspace_id, dataset_id, view_id} for a valid token, or
-    raise ShareNotFound if it is missing, revoked, or expired."""
+    """PUBLIC lookup: {workspace_id, dataset_id, view_id, created_by} for a valid
+    token, or raise ShareNotFound if it is missing, revoked, or expired."""
     r = con.execute(
-        "SELECT workspace_id, dataset_id, view_id, revoked, expires_at FROM share_links WHERE token = ?",
+        "SELECT workspace_id, dataset_id, view_id, revoked, expires_at, created_by "
+        "FROM share_links WHERE token = ?",
         [token],
     ).fetchone()
     if r is None or r[3]:  # missing or revoked
         raise ShareNotFound("share link not found")
     if r[4] is not None and r[4] <= _utcnow_naive():
         raise ShareNotFound("share link has expired")
-    return {"workspace_id": r[0], "dataset_id": r[1], "view_id": r[2]}
+    return {"workspace_id": r[0], "dataset_id": r[1], "view_id": r[2], "created_by": r[5]}
 
 
 def resolve_share_dashboard_config(con, token: str):
-    """PUBLIC: (workspace_id, dataset_id, view_config) for a valid token. The
-    pinned view's config (filters/date/measure/hidden_sections) is returned so
-    the public dashboard renders exactly what was shared."""
+    """PUBLIC: (workspace_id, dataset_id, view_config, created_by) for a valid
+    token. The pinned view's config (filters/date/measure/hidden_sections) is
+    returned so the public dashboard renders exactly what was shared.
+
+    `created_by` matters for row-level security: a link shows the rows its
+    AUTHOR could see. Without that, a member restricted to one region could
+    publish a link and read the whole dataset through it.
+    """
     share = resolve_share(con, token)
     cfg: dict = {}
     if share["view_id"]:
@@ -130,4 +136,4 @@ def resolve_share_dashboard_config(con, token: str):
             cfg = _get_view(con, share["workspace_id"], share["view_id"])["config"]
         except ViewNotFound:
             cfg = {}  # view deleted after sharing → fall back to the full dashboard
-    return share["workspace_id"], share["dataset_id"], cfg
+    return share["workspace_id"], share["dataset_id"], cfg, share["created_by"]

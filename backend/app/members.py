@@ -9,6 +9,7 @@ delete themselves.
 
 import secrets
 
+from .core import passwords
 from .core.security import hash_password, new_id, verify_password
 
 ROLES = ("admin", "editor", "viewer")
@@ -55,10 +56,14 @@ def create_member(con, workspace_id: str, email: str, role: str, password: str |
 
     temp = None
     if password:
-        if len(password) < MIN_PASSWORD:
-            raise MemberError(f"password must be at least {MIN_PASSWORD} characters")
+        try:
+            passwords.validate(password, email=email)
+        except passwords.WeakPassword as exc:
+            raise MemberError(str(exc))
     else:
-        password = secrets.token_urlsafe(9)
+        # generated, so it is long and random by construction — the policy
+        # exists to stop humans choosing badly, not to second-guess urandom
+        password = secrets.token_urlsafe(12)
         temp = password
 
     user_id = new_id("usr")
@@ -79,7 +84,9 @@ def update_member_role(con, workspace_id: str, actor_user_id: str, user_id: str,
         raise MemberNotFound("member not found")
     if target[0] == "admin" and role != "admin" and _admin_count(con, workspace_id, exclude=user_id) == 0:
         raise MemberError("this is the workspace's only admin — promote someone else first")
-    con.execute("UPDATE users SET role = ? WHERE user_id = ? AND workspace_id = ?",
+    # bump the epoch so a demotion cannot be outlived by an already-issued token
+    con.execute("UPDATE users SET role = ?, token_epoch = COALESCE(token_epoch, 0) + 1 "
+                "WHERE user_id = ? AND workspace_id = ?",
                 [role, user_id, workspace_id])
     return {"user_id": user_id, "role": role}
 
@@ -104,7 +111,18 @@ def change_password(con, user_id: str, old_password: str, new_password: str) -> 
         raise MemberNotFound("user not found")
     if not verify_password(old_password, row[0]):
         raise MemberError("current password is incorrect")
-    if len(new_password or "") < MIN_PASSWORD:
-        raise MemberError(f"new password must be at least {MIN_PASSWORD} characters")
-    con.execute("UPDATE users SET password_hash = ? WHERE user_id = ?", [hash_password(new_password), user_id])
-    return {"ok": True}
+    email = con.execute("SELECT email FROM users WHERE user_id = ?", [user_id]).fetchone()[0]
+    try:
+        passwords.validate(new_password, email=email)
+    except passwords.WeakPassword as exc:
+        raise MemberError(str(exc))
+    # Changing a password must end every session opened with the old one —
+    # otherwise "I think someone has my password" has no remedy.
+    con.execute(
+        """UPDATE users
+           SET password_hash = ?, token_epoch = COALESCE(token_epoch, 0) + 1,
+               failed_logins = 0, locked_until = NULL
+           WHERE user_id = ?""",
+        [hash_password(new_password), user_id],
+    )
+    return {"ok": True, "sessions_revoked": True}

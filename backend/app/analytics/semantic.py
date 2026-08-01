@@ -17,6 +17,7 @@ import json
 from ..core.security import new_id
 from ..core.sqlsafe import UnsafeIdentifierError, safe_identifier, safe_table_name
 from .engine import get_columns, get_dataset
+from .rls import secured_relation
 
 # aggregate token -> SQL function (fixed whitelist; nothing else can be emitted)
 AGGS = {"sum", "avg", "min", "max", "median", "count", "count_distinct"}
@@ -113,7 +114,7 @@ def delete_metric(con, workspace_id, metric_id) -> int:
     return n
 
 
-def compute_metric(con, workspace_id, dataset_id, metric) -> tuple[float | None, str]:
+def compute_metric(con, workspace_id, dataset_id, metric, user_id=None) -> tuple[float | None, str]:
     """Return (value, sql). `sql` is a human-readable, read-only query using the
     dataset's friendly name — safe to show, since it is built only from
     whitelisted identifiers and fixed aggregate tokens."""
@@ -122,8 +123,8 @@ def compute_metric(con, workspace_id, dataset_id, metric) -> tuple[float | None,
         raise MetricError("metrics only apply to structured datasets")
     allowed = {c.name for c in get_columns(con, workspace_id, dataset_id)}
     expr = _expr(metric, allowed)
-    tq = safe_table_name(dataset["table_name"])
-    value = con.execute(f"SELECT {expr} FROM {tq}").fetchone()[0]
+    tq, rls_params = secured_relation(con, workspace_id, user_id, dataset)
+    value = con.execute(f"SELECT {expr} FROM {tq}", list(rls_params)).fetchone()[0]
     value = None if value is None else float(value)
 
     display_expr = expr
@@ -135,7 +136,7 @@ def compute_metric(con, workspace_id, dataset_id, metric) -> tuple[float | None,
     return value, sql
 
 
-def list_metrics(con, workspace_id, dataset_id, with_values=True) -> list[dict]:
+def list_metrics(con, workspace_id, dataset_id, with_values=True, user_id=None) -> list[dict]:
     rows = con.execute(
         f"SELECT {_SELECT} FROM metrics WHERE workspace_id = ? AND dataset_id = ? ORDER BY created_at",
         [workspace_id, dataset_id],
@@ -144,7 +145,7 @@ def list_metrics(con, workspace_id, dataset_id, with_values=True) -> list[dict]:
     if with_values:
         for m in metrics:
             try:
-                m["value"], m["sql"] = compute_metric(con, workspace_id, dataset_id, m)
+                m["value"], m["sql"] = compute_metric(con, workspace_id, dataset_id, m, user_id)
                 m["error"] = None
             except Exception as exc:  # a bad metric never breaks the whole list
                 m["value"], m["sql"], m["error"] = None, None, str(exc)

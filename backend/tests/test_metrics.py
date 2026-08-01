@@ -47,7 +47,7 @@ def test_pareto_finds_80_percent_cutoff():
 # ---- dashboard surfacing ----
 
 def test_dashboard_includes_growth_std_and_pareto(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     rows = [["date", "branch", "revenue"]]
     branches = ["Delhi"] * 6 + ["Mumbai"] * 3 + ["Pune"]  # skewed -> pareto
     for m in range(1, 14):  # 13 months for YoY

@@ -7,7 +7,7 @@ import io
 import pytest
 
 from app.analytics.nlquery import (
-    QueryIntent, _validate_intent, answer_data_question, build_schema,
+    QueryError, QueryIntent, _validate_intent, answer_data_question, build_schema,
     execute_intent, question_to_intent,
 )
 from app.ingest.pipeline import ingest_upload
@@ -27,7 +27,7 @@ for _m in range(1, 13):
 
 @pytest.fixture()
 def ds(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
     return con, "ws_a", res.dataset_id
 
@@ -72,15 +72,38 @@ def test_parse_filter_value(ds):
 
 # ---- validation / safety ----
 
-def test_validator_rejects_unknown_columns(ds):
+def test_validator_refuses_an_unknown_metric(ds):
+    """A metric we do not have must be REFUSED, not swapped for one we do.
+
+    Substituting silently answers a different question than the one asked —
+    with a real number and real SQL behind it — which is the "plausible but
+    wrong" failure the whole product is built to prevent. (Earlier this
+    asserted the substitution; the grounding benchmark showed what that costs:
+    "total profit margin" was answered with SUM(revenue).)
+    """
+    con, ws, dsid = ds
+    schema = build_schema(con, ws, dsid)
+    with pytest.raises(QueryError) as exc:
+        _validate_intent(
+            {"metric": "password_hash", "aggregation": "sum", "group_by": "secret_table",
+             "filters": {"drop": "x"}, "chart_type": "bar"}, schema)
+    # and the refusal tells the user what IS available
+    assert "revenue" in str(exc.value)
+
+
+def test_validator_drops_unknown_dimensions_and_filters(ds):
+    """Unknown identifiers must never reach SQL — the injection guarantee.
+
+    Unlike a metric, a dropped group-by or filter widens the result rather than
+    silently answering about a different quantity, so dropping is safe here.
+    """
     con, ws, dsid = ds
     schema = build_schema(con, ws, dsid)
     intent = _validate_intent(
-        {"metric": "password_hash", "aggregation": "sum", "group_by": "secret_table",
+        {"metric": "revenue", "aggregation": "sum", "group_by": "secret_table",
          "filters": {"drop": "x"}, "chart_type": "bar"}, schema)
-    assert intent.metric in {"revenue", "units_sold"}     # fell back to a real measure
-    assert intent.group_by is None                          # unknown dim dropped
-    assert intent.filters == {}                             # unknown filter dropped
+    assert intent.group_by is None
+    assert intent.filters == {}
 
 
 def test_validator_rejects_bad_aggregation(ds):

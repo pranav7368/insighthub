@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getBilling, setBillingPlan, startCheckout } from "../api";
+import { errorText, getBilling, setBillingPlan, startCheckout } from "../api";
 
 const RESOURCES = [
   ["datasets", "Datasets"],
@@ -41,7 +41,7 @@ export default function BillingDialog({ onClose }) {
       if (url) window.location.href = url;
     } catch (err) {
       // Stripe not configured — offer the manual/self-hosted path
-      setError(err?.response?.data?.detail || "Checkout is unavailable.");
+      setError(errorText(err, "Checkout is unavailable."));
     } finally {
       setBusy(false);
     }
@@ -50,7 +50,7 @@ export default function BillingDialog({ onClose }) {
   const setPlan = async (plan) => {
     setBusy(true); setError(null);
     try { await setBillingPlan(plan); load(); }
-    catch (err) { setError(err?.response?.data?.detail || "Could not change the plan."); }
+    catch (err) { setError(errorText(err, "Could not change the plan.")); }
     finally { setBusy(false); }
   };
 

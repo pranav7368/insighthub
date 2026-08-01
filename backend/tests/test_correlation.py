@@ -18,7 +18,7 @@ def _csv(rows):
 
 @pytest.fixture()
 def ds(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     # units_sold perfectly correlated with revenue (revenue = 10*units);
     # cost negatively related
     rows = [["date", "branch", "revenue", "units_sold", "cost"]]
@@ -73,7 +73,7 @@ def test_compute_scatter_rejects_unknown_column(ds):
 
 
 def test_treemap_builds_two_level_hierarchy(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     rows = [["date", "business_unit", "branch", "revenue"]]
     data = [("Retail", "Delhi", 100), ("Retail", "Mumbai", 60),
             ("Wholesale", "Delhi", 200), ("Wholesale", "Pune", 40)]

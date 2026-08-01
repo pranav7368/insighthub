@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ask } from "../api";
+import { ask, errorText } from "../api";
 import DataChat from "./DataChat";
 
 const SUGGESTIONS = [
@@ -58,7 +58,7 @@ function DocumentsChat() {
       setHistory((h) => [{ question: text, answer }, ...h]);
     } catch (err) {
       setHistory((h) => [
-        { question: text, answer: { abstained: true, abstention_reason: err?.response?.data?.detail || "Request failed", claims: [] } },
+        { question: text, answer: { abstained: true, abstention_reason: errorText(err, "Request failed"), claims: [] } },
         ...h,
       ]);
     } finally {

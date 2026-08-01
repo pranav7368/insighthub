@@ -6,6 +6,8 @@ another tenant's data by guessing an id.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, UploadFile
@@ -33,19 +35,29 @@ from .analytics.semantic import (
     MetricError, create_metric, delete_metric, list_metrics,
 )
 from .analytics.drivers import DriverError, explain_change
+from .analytics.rls import (
+    RuleError, RuleNotFound, create_rule, delete_rule, list_rules, secured_relation,
+)
+from .analytics.privacy import KINDS as PII_KINDS, list_policies, set_policy
 from .analytics.joins import (
     JoinError, RelationNotFound, create_join, delete_relation, list_relations,
     rebuild_join, suggest_join_keys,
 )
 from .qa.llm import provider_status
-from .api.deps import Principal, get_principal, require_admin, require_editor
+from .api.deps import (
+    Principal, get_principal, get_principal_for_mfa_setup, require_admin, require_editor,
+)
 from .members import (
     MemberError, MemberNotFound, change_password, create_member, delete_member,
     list_members, update_member_role,
 )
 from .billing import BillingError, QuotaError, check_quota, entitlements, set_plan
 from . import billing_stripe
-from .core import config, db
+from .core import config, db, mfa, observability, passwords, retention
+from .core.datarights import (
+    DataRightsError, as_download, erase_member, erase_workspace,
+    export_member, export_workspace,
+)
 from .core import ratelimit
 from .core.security import create_access_token, hash_password, new_id, verify_password
 from .ingest.append import append_to_dataset, list_batches, rollback_batch
@@ -54,11 +66,91 @@ from .ingest.connectors import (
     list_sources, sync_source,
 )
 from .ingest.pipeline import create_structured_dataset, ingest_upload
-from .ingest.sample import build_sample_df
+from .ingest.templates import (
+    DEFAULT_TEMPLATE_ID, Template, UnknownTemplate, catalog, get_template,
+)
 from .core.sqlsafe import safe_identifier, safe_table_name
 from .qa.engine import answer_question
 
-app = FastAPI(title="InsightHub API", version="0.1.0")
+
+# --------------------------------------------------- startup / shutdown ---
+# Defined before the app so it can be passed to FastAPI(lifespan=...).
+
+def _production_issues() -> list[str]:
+    """Config problems that make a production deployment unsafe."""
+    issues = []
+    if config.ENV == "production":
+        if config.SECRET_KEY.startswith("dev-only-insecure"):
+            issues.append("IH_SECRET_KEY is still the insecure development default")
+        if not config.CORS_ORIGINS.strip():
+            issues.append("IH_CORS_ORIGINS is not set — CORS would fall back to permissive localhost")
+    return issues
+
+
+def _enforce_secure_config():
+    issues = _production_issues()
+    if issues:
+        raise RuntimeError("refusing to start in production: " + "; ".join(issues))
+    if config.SECRET_KEY.startswith("dev-only-insecure"):
+        print("[ih][WARNING] IH_SECRET_KEY is the insecure default - set a real secret before any real use.")
+
+
+# Background auto-refresh for live data sources. Blocking DuckDB/HTTP work runs
+# in a worker thread so the event loop is never blocked; each source is synced
+# independently and its own errors are recorded (never crash the loop).
+def _run_scheduled_work() -> None:
+    con = db.connect()
+    for source_id, workspace_id in due_sources(con):
+        try:
+            sync_source(con, workspace_id, source_id)
+        except Exception:  # already recorded on the source row
+            pass
+    try:
+        run_due_alerts(con)  # each alert isolates its own errors
+    except Exception:
+        pass
+    try:
+        # only workspaces that configured a period are touched
+        retention.sweep_all(con)
+    except Exception:
+        pass
+
+
+async def _scheduler_loop() -> None:
+    while True:
+        await asyncio.sleep(config.SCHEDULER_TICK_SECONDS)
+        try:
+            await asyncio.to_thread(_run_scheduled_work)
+        except Exception as exc:  # never let the loop die
+            print(f"[ih][scheduler] {exc}")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup and shutdown.
+
+    Replaces the deprecated @app.on_event handlers, which FastAPI will remove.
+    The scheduler task is now cancelled on shutdown rather than left dangling —
+    under the old handlers nothing ever stopped it, so a test client or a
+    reload leaked a task that kept touching the database.
+    """
+    _enforce_secure_config()
+
+    scheduler: asyncio.Task | None = None
+    if config.ENABLE_SCHEDULER:
+        scheduler = asyncio.create_task(_scheduler_loop())
+
+    yield
+
+    if scheduler is not None:
+        scheduler.cancel()
+        try:
+            await scheduler
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(title="InsightHub API", version="0.1.0", lifespan=lifespan)
 
 # CORS: an explicit allow-list of origins in production; a permissive localhost
 # regex only when none is configured (local dev).
@@ -87,6 +179,38 @@ def _client_ip(request: Request) -> str:
 
 
 @app.middleware("http")
+async def _observe(request: Request, call_next):
+    """One structured line per request, correlated by X-Request-Id.
+
+    A caller may supply the id (so a trace survives a proxy hop); otherwise one
+    is minted. It is echoed back on the response so a user can quote it.
+    """
+    request_id = request.headers.get("x-request-id") or observability.new_request_id()
+    token = observability.request_id_var.set(request_id)
+    timer = observability.Timer()
+    try:
+        with timer:
+            response = await call_next(request)
+    except Exception as exc:
+        observability.report_exception(
+            exc, method=request.method, path=request.url.path)
+        raise
+    finally:
+        observability.request_id_var.reset(token)
+
+    if request.url.path.startswith("/api/") and request.url.path not in ("/api/health", "/api/ready"):
+        observability.event(
+            "request",
+            method=request.method,
+            path=request.url.path,          # identifiers only — never query values
+            status=response.status_code,
+            duration_ms=timer.ms,
+        )
+    response.headers["X-Request-Id"] = request_id
+    return response
+
+
+@app.middleware("http")
 async def _rate_limit_and_headers(request: Request, call_next):
     path = request.url.path
     if (config.RATE_LIMIT_ENABLED and path.startswith("/api/") and path not in ("/api/health", "/api/ready")):
@@ -104,55 +228,6 @@ async def _rate_limit_and_headers(request: Request, call_next):
     return response
 
 
-def _production_issues() -> list[str]:
-    """Config problems that make a production deployment unsafe."""
-    issues = []
-    if config.ENV == "production":
-        if config.SECRET_KEY.startswith("dev-only-insecure"):
-            issues.append("IH_SECRET_KEY is still the insecure development default")
-        if not config.CORS_ORIGINS.strip():
-            issues.append("IH_CORS_ORIGINS is not set — CORS would fall back to permissive localhost")
-    return issues
-
-
-@app.on_event("startup")
-def _enforce_secure_config():
-    issues = _production_issues()
-    if issues:
-        raise RuntimeError("refusing to start in production: " + "; ".join(issues))
-    if config.SECRET_KEY.startswith("dev-only-insecure"):
-        print("[ih][WARNING] IH_SECRET_KEY is the insecure default - set a real secret before any real use.")
-
-
-# Background auto-refresh for live data sources. Blocking DuckDB/HTTP work runs
-# in a worker thread so the event loop is never blocked; each source is synced
-# independently and its own errors are recorded (never crash the loop).
-def _run_scheduled_work() -> None:
-    con = db.connect()
-    for source_id, workspace_id in due_sources(con):
-        try:
-            sync_source(con, workspace_id, source_id)
-        except Exception:  # already recorded on the source row
-            pass
-    try:
-        run_due_alerts(con)  # each alert isolates its own errors
-    except Exception:
-        pass
-
-
-async def _scheduler_loop() -> None:
-    while True:
-        await asyncio.sleep(config.SCHEDULER_TICK_SECONDS)
-        try:
-            await asyncio.to_thread(_run_scheduled_work)
-        except Exception as exc:  # never let the loop die
-            print(f"[ih][scheduler] {exc}")
-
-
-@app.on_event("startup")
-async def _start_scheduler():
-    if config.ENABLE_SCHEDULER:
-        asyncio.create_task(_scheduler_loop())
 
 
 # ----------------------------------------------------------- auth --------
@@ -166,12 +241,16 @@ class SignupBody(BaseModel):
 class LoginBody(BaseModel):
     email: EmailStr
     password: str
+    # supplied on the second attempt, once the client has been told mfa_required
+    mfa_code: str | None = None
 
 
 @app.post("/api/auth/signup")
 def signup(body: SignupBody):
-    if len(body.password) < 8:
-        raise HTTPException(status_code=400, detail="password must be at least 8 characters")
+    try:
+        passwords.validate(body.password, email=body.email, workspace_name=body.workspace_name)
+    except passwords.WeakPassword as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
     con = db.connect()
     exists = con.execute("SELECT 1 FROM users WHERE email = ?", [body.email]).fetchone()
     if exists:
@@ -184,20 +263,377 @@ def signup(body: SignupBody):
         [user_id, workspace_id, body.email, hash_password(body.password)],
     )
     db.audit(con, workspace_id, user_id, "signup", body.email)
-    token = create_access_token(user_id, workspace_id, "admin")
+    token = create_access_token(user_id, workspace_id, "admin", 0)
     return {"access_token": token, "workspace_id": workspace_id, "role": "admin"}
+
+
+# Online-guessing defence, per account. The per-IP limiter cannot see an
+# attack distributed across many addresses against one mailbox.
+MAX_FAILED_LOGINS = 8
+LOCKOUT_MINUTES = 15
 
 
 @app.post("/api/auth/login")
 def login(body: LoginBody):
     con = db.connect()
     row = con.execute(
-        "SELECT user_id, workspace_id, password_hash, role FROM users WHERE email = ?", [body.email]
+        """SELECT user_id, workspace_id, password_hash, role, token_epoch,
+                  failed_logins, locked_until
+           FROM users WHERE email = ?""",
+        [body.email],
     ).fetchone()
-    if row is None or not verify_password(body.password, row[2]):
-        raise HTTPException(status_code=401, detail="invalid email or password")
-    token = create_access_token(row[0], row[1], row[3])
-    return {"access_token": token, "workspace_id": row[1], "role": row[3]}
+
+    # One message and one code for every failure below, so the response never
+    # reveals whether an address is registered or a account is locked.
+    invalid = HTTPException(status_code=401, detail="invalid email or password")
+    if row is None:
+        raise invalid
+
+    user_id, workspace_id, password_hash, role, epoch, failed, locked_until = row
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if locked_until is not None and locked_until > now:
+        raise invalid
+
+    if not verify_password(body.password, password_hash):
+        failed = int(failed or 0) + 1
+        lock_to = now + timedelta(minutes=LOCKOUT_MINUTES) if failed >= MAX_FAILED_LOGINS else None
+        con.execute("UPDATE users SET failed_logins = ?, locked_until = ? WHERE user_id = ?",
+                    [failed, lock_to, user_id])
+        if lock_to is not None:
+            db.audit(con, workspace_id, user_id, "login_locked", body.email)
+        raise invalid
+
+    # Password accepted. If a second factor is enrolled it must be satisfied
+    # before any token is issued.
+    mfa_row = con.execute(
+        "SELECT mfa_enabled, mfa_secret, mfa_last_step FROM users WHERE user_id = ?", [user_id]
+    ).fetchone()
+    if mfa_row and mfa_row[0] and mfa_row[1]:
+        if not body.mfa_code:
+            # 401 with a distinct code: the client must prompt for the code.
+            # This does confirm the password was right, which is inherent to
+            # any second-factor prompt — the factor is what still stops them.
+            raise HTTPException(status_code=401,
+                                detail="mfa_required: enter the code from your authenticator app")
+        try:
+            step = mfa.verify(mfa_row[1], body.mfa_code, last_used_step=mfa_row[2])
+            con.execute("UPDATE users SET mfa_last_step = ? WHERE user_id = ?", [step, user_id])
+        except mfa.CodeAlreadyUsed as exc:
+            # a correct-but-spent code is not a failed guess; do not count it
+            # towards lockout and do not pretend the password was wrong
+            raise HTTPException(status_code=401, detail=str(exc))
+        except mfa.MfaError:
+            if not _consume_recovery_code(con, workspace_id, user_id, body.mfa_code):
+                failed = int(failed or 0) + 1
+                con.execute("UPDATE users SET failed_logins = ? WHERE user_id = ?", [failed, user_id])
+                raise invalid
+            db.audit(con, workspace_id, user_id, "mfa_recovery_used", body.email)
+
+    con.execute("UPDATE users SET failed_logins = 0, locked_until = NULL WHERE user_id = ?", [user_id])
+    token = create_access_token(user_id, workspace_id, role, int(epoch or 0))
+    return {"access_token": token, "workspace_id": workspace_id, "role": role}
+
+
+def _consume_recovery_code(con, workspace_id: str, user_id: str, supplied: str) -> bool:
+    """Spend a single-use recovery code. Deleting the row is what makes it
+    single-use, so a code cannot be replayed even moments later."""
+    for (code_hash,) in con.execute(
+        "SELECT code_hash FROM mfa_recovery_codes WHERE user_id = ? AND workspace_id = ?",
+        [user_id, workspace_id],
+    ).fetchall():
+        if mfa.recovery_matches(supplied, code_hash):
+            con.execute("DELETE FROM mfa_recovery_codes WHERE user_id = ? AND code_hash = ?",
+                        [user_id, code_hash])
+            return True
+    return False
+
+
+# ------------------------------------------------------ two-factor auth ---
+
+class MfaEnableBody(BaseModel):
+    code: str
+
+
+class MfaDisableBody(BaseModel):
+    password: str
+
+
+@app.post("/api/auth/mfa/setup")
+def mfa_setup(principal: Principal = Depends(get_principal_for_mfa_setup)):
+    """Begin enrolment: mint a secret and return the otpauth:// URI.
+
+    The factor is NOT active yet — mfa_enabled stays false until a code proves
+    the app was configured, so a half-finished setup cannot lock anyone out.
+    """
+    con = db.connect()
+    row = con.execute("SELECT email, mfa_enabled FROM users WHERE user_id = ?",
+                      [principal.user_id]).fetchone()
+    if row and row[1]:
+        raise HTTPException(status_code=400, detail="two-factor authentication is already on")
+    secret = mfa.new_secret()
+    con.execute("UPDATE users SET mfa_secret = ? WHERE user_id = ?", [secret, principal.user_id])
+    return {"secret": secret, "otpauth_uri": mfa.provisioning_uri(secret, row[0]),
+            "detail": "scan or paste this into your authenticator app, then confirm with a code"}
+
+
+@app.post("/api/auth/mfa/enable")
+def mfa_enable(body: MfaEnableBody, principal: Principal = Depends(get_principal_for_mfa_setup)):
+    """Confirm enrolment with a live code, then hand back the recovery codes.
+
+    They are shown exactly once — stored hashed, so we genuinely cannot show
+    them again."""
+    con = db.connect()
+    row = con.execute("SELECT mfa_secret, mfa_enabled FROM users WHERE user_id = ?",
+                      [principal.user_id]).fetchone()
+    if not row or not row[0]:
+        raise HTTPException(status_code=400, detail="start setup first")
+    if row[1]:
+        raise HTTPException(status_code=400, detail="two-factor authentication is already on")
+    try:
+        step = mfa.verify(row[0], body.code)
+    except mfa.MfaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    codes = mfa.new_recovery_codes()
+    con.execute("DELETE FROM mfa_recovery_codes WHERE user_id = ?", [principal.user_id])
+    con.executemany(
+        "INSERT INTO mfa_recovery_codes (user_id, workspace_id, code_hash) VALUES (?, ?, ?)",
+        [(principal.user_id, principal.workspace_id, mfa.hash_recovery_code(c)) for c in codes],
+    )
+    con.execute("UPDATE users SET mfa_enabled = true, mfa_last_step = ? WHERE user_id = ?",
+                [step, principal.user_id])
+    db.audit(con, principal.workspace_id, principal.user_id, "mfa_enabled", principal.user_id)
+    return {"enabled": True, "recovery_codes": codes,
+            "detail": "save these somewhere safe — they will not be shown again"}
+
+
+@app.post("/api/auth/mfa/disable")
+def mfa_disable(body: MfaDisableBody, principal: Principal = Depends(get_principal)):
+    """Turning the factor off requires the password — otherwise a stolen
+    session could quietly remove it."""
+    con = db.connect()
+    row = con.execute("SELECT password_hash FROM users WHERE user_id = ?",
+                      [principal.user_id]).fetchone()
+    if not row or not verify_password(body.password, row[0]):
+        raise HTTPException(status_code=401, detail="password is incorrect")
+    con.execute(
+        "UPDATE users SET mfa_enabled = false, mfa_secret = NULL, mfa_last_step = NULL "
+        "WHERE user_id = ?", [principal.user_id])
+    con.execute("DELETE FROM mfa_recovery_codes WHERE user_id = ?", [principal.user_id])
+    db.audit(con, principal.workspace_id, principal.user_id, "mfa_disabled", principal.user_id)
+    return {"enabled": False}
+
+
+@app.get("/api/auth/mfa")
+def mfa_status(principal: Principal = Depends(get_principal_for_mfa_setup)):
+    con = db.connect()
+    row = con.execute("SELECT mfa_enabled FROM users WHERE user_id = ?",
+                      [principal.user_id]).fetchone()
+    remaining = con.execute(
+        "SELECT count(*) FROM mfa_recovery_codes WHERE user_id = ?", [principal.user_id]
+    ).fetchone()[0]
+    return {"enabled": bool(row and row[0]), "recovery_codes_remaining": remaining}
+
+
+# ------------------------------------------------- data subject rights ----
+# GDPR Arts. 15/17/20 and the DPDP equivalents. Admin-only: producing or
+# erasing personal data is itself a privileged act, and the audit log records
+# every one of them.
+
+@app.get("/api/privacy/export/me")
+def export_my_data(principal: Principal = Depends(get_principal)):
+    """Anyone may export their own record — the right of access does not
+    depend on being an admin."""
+    con = db.connect()
+    try:
+        payload = export_member(con, principal.workspace_id, principal.user_id)
+    except DataRightsError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "export_self", principal.user_id)
+    return Response(content=as_download(payload), media_type="application/json",
+                    headers={"Content-Disposition": 'attachment; filename="my-data.json"'})
+
+
+@app.get("/api/privacy/export/member/{user_id}")
+def export_member_data(user_id: str, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    try:
+        payload = export_member(con, principal.workspace_id, user_id)
+    except DataRightsError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "export_member", user_id)
+    return Response(content=as_download(payload), media_type="application/json",
+                    headers={"Content-Disposition": f'attachment; filename="member-{user_id}.json"'})
+
+
+@app.get("/api/privacy/export/workspace")
+def export_workspace_data(principal: Principal = Depends(require_admin)):
+    """Everything the workspace holds — the processor-side answer to
+    'give us our data back'."""
+    con = db.connect()
+    payload = export_workspace(con, principal.workspace_id)
+    db.audit(con, principal.workspace_id, principal.user_id, "export_workspace",
+             principal.workspace_id)
+    return Response(content=as_download(payload), media_type="application/json",
+                    headers={"Content-Disposition": 'attachment; filename="workspace-export.json"'})
+
+
+@app.delete("/api/privacy/member/{user_id}")
+def erase_member_data(user_id: str, principal: Principal = Depends(require_admin)):
+    """Erase a member. Their audit trail is de-identified, not deleted —
+    destroying the security record is neither required nor wise."""
+    if user_id == principal.user_id:
+        raise HTTPException(status_code=400,
+                            detail="you cannot erase your own admin account; transfer ownership first")
+    con = db.connect()
+    try:
+        result = erase_member(con, principal.workspace_id, user_id)
+    except DataRightsError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "erase_member", user_id)
+    return result
+
+
+class EraseWorkspaceBody(BaseModel):
+    # typing the name is the confirmation step; this is irreversible
+    confirm_workspace_name: str
+
+
+@app.post("/api/privacy/erase-workspace")
+def erase_workspace_data(body: EraseWorkspaceBody, principal: Principal = Depends(require_admin)):
+    """Irreversibly erase this workspace and all of its data, including the
+    physical dataset tables. Requires typing the workspace name back."""
+    con = db.connect()
+    row = con.execute("SELECT name FROM workspaces WHERE workspace_id = ?",
+                      [principal.workspace_id]).fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    if body.confirm_workspace_name.strip() != row[0]:
+        raise HTTPException(status_code=400,
+                            detail="type the workspace name exactly to confirm erasure")
+    # audit BEFORE erasing — the entry is inside the workspace being removed,
+    # so this is a record for the operator's own log shipping, not for the row
+    db.audit(con, principal.workspace_id, principal.user_id, "erase_workspace",
+             principal.workspace_id)
+    try:
+        return erase_workspace(con, principal.workspace_id)
+    except DataRightsError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+class WorkspaceSecurityBody(BaseModel):
+    require_mfa: bool
+
+
+@app.get("/api/workspace/security")
+def get_workspace_security(principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    row = con.execute("SELECT COALESCE(require_mfa, false) FROM workspaces WHERE workspace_id = ?",
+                      [principal.workspace_id]).fetchone()
+    total, enrolled = con.execute(
+        """SELECT count(*), count(*) FILTER (WHERE COALESCE(mfa_enabled, false))
+           FROM users WHERE workspace_id = ?""",
+        [principal.workspace_id],
+    ).fetchone()
+    return {"require_mfa": bool(row and row[0]), "members": total, "members_with_mfa": enrolled}
+
+
+@app.put("/api/workspace/security")
+def set_workspace_security(body: WorkspaceSecurityBody,
+                           principal: Principal = Depends(require_admin)):
+    """Require a second factor for everyone in the workspace.
+
+    Turning it on requires the admin to have enrolled first. Not a lockout —
+    members without a factor can still reach setup — but an admin who turns
+    this on and then cannot administer until they enrol is a confusing first
+    five minutes, and it proves the flow works before it is imposed on others.
+    """
+    con = db.connect()
+    if body.require_mfa:
+        mine = con.execute("SELECT COALESCE(mfa_enabled, false) FROM users WHERE user_id = ?",
+                           [principal.user_id]).fetchone()
+        if not (mine and mine[0]):
+            raise HTTPException(
+                status_code=400,
+                detail="set up two-factor authentication on your own account first, "
+                       "so you can confirm the flow before requiring it of everyone",
+            )
+    con.execute("UPDATE workspaces SET require_mfa = ? WHERE workspace_id = ?",
+                [bool(body.require_mfa), principal.workspace_id])
+    db.audit(con, principal.workspace_id, principal.user_id,
+             "workspace_mfa_required" if body.require_mfa else "workspace_mfa_optional",
+             principal.workspace_id)
+    return get_workspace_security(principal)
+
+
+class RetentionBody(BaseModel):
+    audit_days: int = 0
+    archive_days: int = 0
+    dataset_days: int = 0
+
+
+@app.get("/api/privacy/retention")
+def get_retention(principal: Principal = Depends(require_admin)):
+    """The workspace's retention periods. 0 means keep forever."""
+    policy = retention.get_policy(db.connect(), principal.workspace_id)
+    return {**policy.as_dict(),
+            "minimum_days": retention.MIN_DAYS,
+            "minimum_dataset_days": retention.MIN_DATASET_DAYS}
+
+
+@app.post("/api/privacy/retention/preview")
+def preview_retention(body: RetentionBody, principal: Principal = Depends(require_admin)):
+    """What a sweep WOULD delete under the proposed policy, deleting nothing.
+
+    Retention is the one feature that removes customer data with nobody
+    watching, so the blast radius has to be visible before it is armed.
+    """
+    con = db.connect()
+    try:
+        proposed = retention.validate_policy(body.audit_days, body.archive_days, body.dataset_days)
+    except retention.RetentionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    current = retention.get_policy(con, principal.workspace_id)
+    retention.set_policy(con, principal.workspace_id, proposed)
+    try:
+        return retention.preview(con, principal.workspace_id)
+    finally:
+        retention.set_policy(con, principal.workspace_id, current)   # never persist a preview
+
+
+@app.put("/api/privacy/retention")
+def set_retention(body: RetentionBody, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    try:
+        policy = retention.validate_policy(body.audit_days, body.archive_days, body.dataset_days)
+    except retention.RetentionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    saved = retention.set_policy(con, principal.workspace_id, policy)
+    db.audit(con, principal.workspace_id, principal.user_id, "retention_set",
+             f"audit={saved.audit_days} archive={saved.archive_days} datasets={saved.dataset_days}")
+    return saved.as_dict()
+
+
+@app.post("/api/privacy/retention/run")
+def run_retention(principal: Principal = Depends(require_admin)):
+    """Apply the saved policy now rather than waiting for the scheduler."""
+    return retention.sweep(db.connect(), principal.workspace_id,
+                           audit_actor=principal.user_id)
+
+
+@app.post("/api/auth/revoke-sessions")
+def revoke_sessions(principal: Principal = Depends(get_principal_for_mfa_setup)):
+    """Sign out everywhere. Invalidates every token issued to this account,
+    including the one making the request — the remedy for a laptop left on a
+    train, which a self-contained JWT otherwise has no answer for."""
+    con = db.connect()
+    con.execute(
+        "UPDATE users SET token_epoch = COALESCE(token_epoch, 0) + 1 WHERE user_id = ? AND workspace_id = ?",
+        [principal.user_id, principal.workspace_id],
+    )
+    db.audit(con, principal.workspace_id, principal.user_id, "revoke_sessions", principal.user_id)
+    return {"ok": True, "detail": "all sessions signed out — sign in again"}
 
 
 class ChangePasswordBody(BaseModel):
@@ -346,23 +782,39 @@ def list_datasets(principal: Principal = Depends(get_principal)):
     ]
 
 
+def _ingest_blocking(workspace_id: str, user_id: str, filename: str, content: bytes):
+    """Parse and load a file. Pure blocking work — parsing, DuckDB writes — so
+    it must never run on the event loop. Kept as one unit so the quota check,
+    the load and the audit entry all share a connection."""
+    con = db.connect()
+    check_quota(con, workspace_id, "datasets")
+    result = ingest_upload(con, workspace_id, filename, content)
+    db.audit(con, workspace_id, user_id, "upload", filename)
+    return result
+
+
 @app.post("/api/datasets/upload")
 async def upload(file: UploadFile, principal: Principal = Depends(require_editor)):
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in config.ALLOWED_UPLOAD_SUFFIXES:
         raise HTTPException(status_code=400, detail=f"unsupported file type {suffix!r}")
-    content = await file.read()
+    # even assembling the bytes is worth keeping off the loop for a large file
+    content = await asyncio.to_thread(file.file.read)
     if len(content) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="file too large")
-    con = db.connect()
     try:
-        check_quota(con, principal.workspace_id, "datasets")
-        result = ingest_upload(con, principal.workspace_id, file.filename, content)
+        # to_thread, not a direct call: this handler is async only so it can
+        # await file.read(), and ingesting a few MB inline froze EVERY other
+        # request for the duration — measured at 2s of stalled health checks
+        # during a 3.5 MB upload. Sync `def` endpoints are safe because FastAPI
+        # offloads them itself; async ones have to do it explicitly.
+        result = await asyncio.to_thread(
+            _ingest_blocking, principal.workspace_id, principal.user_id,
+            file.filename, content)
     except QuotaError as exc:
         raise HTTPException(status_code=402, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    db.audit(con, principal.workspace_id, principal.user_id, "upload", file.filename)
     return {
         "dataset_id": result.dataset_id, "name": result.name, "kind": result.kind,
         "row_count": result.row_count, "chunks": result.chunks, "warnings": result.warnings,
@@ -371,19 +823,65 @@ async def upload(file: UploadFile, principal: Principal = Depends(require_editor
     }
 
 
-@app.post("/api/datasets/sample")
-def load_sample(principal: Principal = Depends(require_editor)):
-    """One-click sample dataset so a new user immediately sees a full dashboard."""
-    con = db.connect()
+def _materialize_template(con, principal: Principal, tpl: Template) -> dict:
+    """Build a template's dataset, then its certified metrics and default view.
+
+    The dataset is the deliverable; the metrics and the view are presentation
+    on top of it. A failure in either of those must not lose the data the user
+    just created, so they are best-effort — the dashboard still renders, just
+    without the pre-built arrangement.
+    """
     try:
         check_quota(con, principal.workspace_id, "datasets")
     except QuotaError as exc:
         raise HTTPException(status_code=402, detail=str(exc))
+
     result = create_structured_dataset(
-        con, principal.workspace_id, "Sample — Retail Sales", build_sample_df(), "sample")
-    db.audit(con, principal.workspace_id, principal.user_id, "sample", result.dataset_id)
+        con, principal.workspace_id, tpl.dataset_name, tpl.build(), f"template:{tpl.id}")
+
+    metrics_created = 0
+    for m in tpl.metrics:
+        try:
+            create_metric(con, principal.workspace_id, result.dataset_id,
+                          m.name, m.kind, m.definition, m.format)
+            metrics_created += 1
+        except (MetricError, DatasetNotFound):
+            pass          # a metric that does not fit the data is simply skipped
+    try:
+        create_view(con, principal.workspace_id, result.dataset_id,
+                    tpl.view_name, tpl.view_config(), make_default=True)
+    except (ViewError, DatasetNotFound):
+        pass
+
+    db.audit(con, principal.workspace_id, principal.user_id, "template", f"{tpl.id}:{result.dataset_id}")
     return {"dataset_id": result.dataset_id, "name": result.name, "kind": "structured",
-            "row_count": result.row_count}
+            "row_count": result.row_count, "template_id": tpl.id, "metrics": metrics_created}
+
+
+@app.get("/api/templates")
+def list_templates(principal: Principal = Depends(get_principal)):
+    """The industry template catalog shown on the empty-state gallery."""
+    return catalog()
+
+
+class TemplateBody(BaseModel):
+    template_id: str = DEFAULT_TEMPLATE_ID
+
+
+@app.post("/api/datasets/template")
+def load_template(body: TemplateBody, principal: Principal = Depends(require_editor)):
+    """One click: an industry dataset with its metrics and dashboard arrangement."""
+    try:
+        tpl = get_template(body.template_id)
+    except UnknownTemplate as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _materialize_template(db.connect(), principal, tpl)
+
+
+@app.post("/api/datasets/sample")
+def load_sample(principal: Principal = Depends(require_editor)):
+    """One-click sample dataset so a new user immediately sees a full dashboard."""
+    return _materialize_template(db.connect(), principal, get_template(DEFAULT_TEMPLATE_ID))
 
 
 @app.get("/api/datasets/{dataset_id}/export.csv")
@@ -398,9 +896,9 @@ def export_csv(dataset_id: str, principal: Principal = Depends(get_principal)):
         raise HTTPException(status_code=400, detail="only spreadsheet datasets can be exported")
     cols = [c.name for c in get_columns(con, principal.workspace_id, dataset_id)]
     allowed = set(cols)
-    tq = safe_table_name(dataset["table_name"])
+    tq, rls_params = secured_relation(con, principal.workspace_id, principal.user_id, dataset)
     select = ", ".join(safe_identifier(c, allowed) for c in cols)
-    csv_text = con.execute(f"SELECT {select} FROM {tq}").df().to_csv(index=False)
+    csv_text = con.execute(f"SELECT {select} FROM {tq}", list(rls_params)).df().to_csv(index=False)
     safe_name = "".join(ch for ch in (dataset["name"] or "dataset") if ch.isalnum() or ch in " -_")[:60].strip() or "dataset"
     return Response(
         content=csv_text, media_type="text/csv",
@@ -416,17 +914,24 @@ async def append_data(dataset_id: str, file: UploadFile, mode: str = Form("appen
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in config.ALLOWED_UPLOAD_SUFFIXES:
         raise HTTPException(status_code=400, detail=f"unsupported file type {suffix!r}")
-    content = await file.read()
+    content = await asyncio.to_thread(file.file.read)
     if len(content) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="file too large")
-    con = db.connect()
+
+    def work():
+        con = db.connect()
+        result = append_to_dataset(con, principal.workspace_id, dataset_id,
+                                   file.filename, content, mode)
+        db.audit(con, principal.workspace_id, principal.user_id, "append",
+                 f"{file.filename} ({mode})")
+        return result
+
     try:
-        result = append_to_dataset(con, principal.workspace_id, dataset_id, file.filename, content, mode)
+        result = await asyncio.to_thread(work)      # blocking, like upload
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    db.audit(con, principal.workspace_id, principal.user_id, "append", f"{file.filename} ({mode})")
     return result
 
 
@@ -612,7 +1117,7 @@ def public_dashboard(token: str):
     The token is the only credential; it names exactly one dataset."""
     con = db.connect()
     try:
-        workspace_id, dataset_id, cfg = resolve_share_dashboard_config(con, token)
+        workspace_id, dataset_id, cfg, author_id = resolve_share_dashboard_config(con, token)
     except ShareNotFound:
         raise HTTPException(status_code=404, detail="this link is invalid or has expired")
     try:
@@ -621,10 +1126,14 @@ def public_dashboard(token: str):
             filters=(cfg.get("filters") or None),
             date_from=cfg.get("date_from"), date_to=cfg.get("date_to"),
             breakdown_measure=cfg.get("measure"),
+            user_id=author_id,          # a link shows only what its author could see
         )
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="this dashboard is no longer available")
-    return {"dashboard": dash, "meta": {"hidden_sections": cfg.get("hidden_sections", [])}}
+    return {"dashboard": dash, "meta": {
+        "hidden_sections": cfg.get("hidden_sections", []),
+        "section_order": cfg.get("section_order", []),
+    }}
 
 
 # ------------------------------------------------- threshold alerts ------
@@ -650,7 +1159,8 @@ def add_alert(dataset_id: str, body: AlertCreateBody, principal: Principal = Dep
     try:
         check_quota(con, principal.workspace_id, "alerts")
         alert = create_alert(con, principal.workspace_id, dataset_id, body.name, body.measure,
-                             body.aggregate, body.op, body.threshold, body.webhook_url)
+                             body.aggregate, body.op, body.threshold, body.webhook_url,
+                             created_by=principal.user_id)
     except QuotaError as exc:
         raise HTTPException(status_code=402, detail=str(exc))
     except DatasetNotFound:
@@ -774,6 +1284,7 @@ def explain(dataset_id: str, request: Request, principal: Principal = Depends(ge
             con, principal.workspace_id, dataset_id,
             measure=request.query_params.get("measure"),
             dimension=request.query_params.get("dimension"),
+            user_id=principal.user_id,
         )
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
@@ -793,7 +1304,8 @@ class MetricCreateBody(BaseModel):
 @app.get("/api/datasets/{dataset_id}/metrics")
 def get_metrics(dataset_id: str, principal: Principal = Depends(get_principal)):
     con = db.connect()
-    return list_metrics(con, principal.workspace_id, dataset_id, with_values=True)
+    return list_metrics(con, principal.workspace_id, dataset_id, with_values=True,
+                        user_id=principal.user_id)
 
 
 @app.post("/api/datasets/{dataset_id}/metrics")
@@ -808,7 +1320,8 @@ def add_metric(dataset_id: str, body: MetricCreateBody, principal: Principal = D
         raise HTTPException(status_code=400, detail=str(exc))
     db.audit(con, principal.workspace_id, principal.user_id, "metric_create", body.name)
     # return the metric with its computed value + SQL
-    return list_metrics(con, principal.workspace_id, dataset_id, with_values=True)
+    return list_metrics(con, principal.workspace_id, dataset_id, with_values=True,
+                        user_id=principal.user_id)
 
 
 @app.delete("/api/metrics/{metric_id}")
@@ -819,6 +1332,87 @@ def remove_metric(metric_id: str, principal: Principal = Depends(require_editor)
         raise HTTPException(status_code=404, detail="metric not found")
     db.audit(con, principal.workspace_id, principal.user_id, "metric_delete", metric_id)
     return {"ok": True}
+
+
+# ------------------------------------------------ row-level security -----
+
+class RuleBody(BaseModel):
+    user_id: str
+    column_name: str
+    values: list[str]
+    operator: str = "in"
+
+
+@app.get("/api/datasets/{dataset_id}/rls")
+def get_rls_rules(dataset_id: str, principal: Principal = Depends(require_admin)):
+    """Who is restricted to which rows on this dataset. Admin-only: the rules
+    are the access-control policy, so reading them is itself privileged."""
+    return list_rules(db.connect(), principal.workspace_id, dataset_id)
+
+
+@app.post("/api/datasets/{dataset_id}/rls")
+def add_rls_rule(dataset_id: str, body: RuleBody, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    try:
+        rule = create_rule(con, principal.workspace_id, dataset_id, body.user_id,
+                           body.column_name, body.values, body.operator)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except RuleError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "rls_create",
+             f"{body.user_id}:{body.column_name}")
+    return rule
+
+
+@app.delete("/api/rls/{rule_id}")
+def remove_rls_rule(rule_id: str, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    if not delete_rule(con, principal.workspace_id, rule_id):
+        raise HTTPException(status_code=404, detail="rule not found")
+    db.audit(con, principal.workspace_id, principal.user_id, "rls_delete", rule_id)
+    return {"ok": True}
+
+
+# --------------------------------------------------------- PII policy ----
+
+class PolicyBody(BaseModel):
+    column_name: str
+    masked: bool
+    pii_kind: str | None = None
+
+
+@app.get("/api/datasets/{dataset_id}/privacy")
+def get_privacy(dataset_id: str, principal: Principal = Depends(require_admin)):
+    """Which columns are treated as PII and whether they are masked. Admin-only
+    — this is the list of what is sensitive about the data."""
+    con = db.connect()
+    try:
+        get_dataset(con, principal.workspace_id, dataset_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    return list_policies(con, principal.workspace_id, dataset_id)
+
+
+@app.patch("/api/datasets/{dataset_id}/privacy")
+def set_privacy(dataset_id: str, body: PolicyBody, principal: Principal = Depends(require_admin)):
+    """Turn masking on or off for one column. The underlying values are never
+    rewritten, so this is reversible at any time."""
+    con = db.connect()
+    try:
+        get_dataset(con, principal.workspace_id, dataset_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    known = {c.name for c in get_columns(con, principal.workspace_id, dataset_id)}
+    if body.column_name not in known:
+        raise HTTPException(status_code=400, detail=f"unknown column {body.column_name!r}")
+    if body.pii_kind is not None and body.pii_kind not in PII_KINDS:
+        raise HTTPException(status_code=400, detail="invalid pii kind")
+    set_policy(con, principal.workspace_id, dataset_id, body.column_name,
+               body.pii_kind, body.masked)
+    db.audit(con, principal.workspace_id, principal.user_id,
+             "privacy_mask" if body.masked else "privacy_unmask", body.column_name)
+    return list_policies(con, principal.workspace_id, dataset_id)
 
 
 @app.get("/api/datasets/{dataset_id}/schema")
@@ -870,6 +1464,7 @@ def dashboard(dataset_id: str, request: Request, principal: Principal = Depends(
             filters=filters or None,
             date_from=query.get("date_from"), date_to=query.get("date_to"),
             breakdown_measure=query.get("measure"),
+            user_id=principal.user_id,
         )
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
@@ -899,7 +1494,8 @@ def scatter(dataset_id: str, request: Request, principal: Principal = Depends(ge
     con = db.connect()
     try:
         return compute_scatter(con, principal.workspace_id, dataset_id, x, y,
-                               filters=query or None, date_from=date_from, date_to=date_to)
+                               filters=query or None, date_from=date_from, date_to=date_to,
+                               user_id=principal.user_id)
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
     except ValueError as exc:
@@ -910,7 +1506,7 @@ def scatter(dataset_id: str, request: Request, principal: Principal = Depends(ge
 def data_quality(dataset_id: str, principal: Principal = Depends(get_principal)):
     con = db.connect()
     try:
-        return compute_quality(con, principal.workspace_id, dataset_id)
+        return compute_quality(con, principal.workspace_id, dataset_id, principal.user_id)
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
 
@@ -944,7 +1540,8 @@ def query_data(dataset_id: str, body: DataQueryBody, principal: Principal = Depe
     numbers)."""
     con = db.connect()
     try:
-        result = answer_data_question(con, principal.workspace_id, dataset_id, body.question)
+        result = answer_data_question(con, principal.workspace_id, dataset_id, body.question,
+                                      user_id=principal.user_id)
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
     except QueryError as exc:

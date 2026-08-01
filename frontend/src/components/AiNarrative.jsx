@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { getNarrative } from "../api";
+import { errorText, getNarrative } from "../api";
 
 const RANK = { high: 0, medium: 1, low: 2 };
 
@@ -14,7 +14,7 @@ export default function AiNarrative({ datasetId }) {
     try {
       setData(await getNarrative(datasetId));
     } catch (e) {
-      setError(e?.response?.data?.detail || "Could not generate narrative");
+      setError(errorText(e, "Could not generate narrative"));
     } finally {
       setBusy(false);
     }

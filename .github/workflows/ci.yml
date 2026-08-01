@@ -1,0 +1,130 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (pytest)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: insighthub
+          POSTGRES_PASSWORD: insighthub
+          POSTGRES_DB: insighthub
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # tests never reach the network and opt in to gated features individually
+      IH_OFFLINE: "1"
+      # exercises the Postgres-backed paths that are skipped locally
+      IH_TEST_DATABASE_URL: postgresql://insighthub:insighthub@localhost:5432/insighthub
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      - name: Run tests
+        working-directory: backend
+        run: python -m pytest -q
+
+  benchmark:
+    name: Grounding benchmark
+    runs-on: ubuntu-latest
+    env:
+      IH_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+      # Scored, not asserted-in-passing: the summary is printed so a reviewer
+      # can see correctness / grounding / abstention move release to release.
+      - name: Score the golden question set
+        working-directory: backend
+        run: python -m pytest tests/eval -q -s
+
+  frontend:
+    name: Frontend (lint + test + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Lint
+        working-directory: frontend
+        run: npx oxlint src
+      - name: Test
+        working-directory: frontend
+        run: npm test
+      - name: Build
+        working-directory: frontend
+        run: npx vite build
+
+  security:
+    name: Security (dependency audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Audit Python dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          # report-only for now: a new upstream CVE should raise a flag, not
+          # block an unrelated hotfix. Flip to a hard failure once the backlog
+          # of transitive advisories is triaged.
+          pip-audit -r requirements.txt || true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Audit npm dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high || true
+
+  docker:
+    name: Docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build backend image
+        run: docker build -t insighthub-backend ./backend
+      - name: Build frontend image
+        run: docker build -t insighthub-frontend ./frontend

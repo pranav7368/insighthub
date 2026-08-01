@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { applyClean, getQuality } from "../api";
+import { useCallback, useEffect, useState } from "react";
+import { applyClean, errorText, getQuality } from "../api";
 import { humanLabel } from "../format";
 
 const ACTION_LABEL = {
@@ -14,15 +14,15 @@ export default function DataQuality({ datasetId, onClose, onChanged }) {
   const [busy, setBusy] = useState(null);
   const [error, setError] = useState(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     setError(null);
     try {
       setReport(await getQuality(datasetId));
     } catch (err) {
-      setError(err?.response?.data?.detail || "Could not load quality report");
+      setError(errorText(err, "Could not load quality report"));
     }
-  };
-  useEffect(() => { load(); }, [datasetId]);
+  }, [datasetId]);
+  useEffect(() => { load(); }, [load]);
 
   const run = async (action, column) => {
     setBusy(`${action}:${column || ""}`);
@@ -31,7 +31,7 @@ export default function DataQuality({ datasetId, onClose, onChanged }) {
       await load();
       onChanged?.();
     } catch (err) {
-      setError(err?.response?.data?.detail || "Action failed");
+      setError(errorText(err, "Action failed"));
     } finally {
       setBusy(null);
     }

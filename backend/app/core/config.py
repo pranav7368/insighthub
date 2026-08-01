@@ -17,6 +17,11 @@ DATABASE_URL = os.environ.get("IH_DATABASE_URL", "").strip()
 # opening (and, for Postgres, re-ATTACHing) on every request. On by default in
 # real runs; disabled under tests so each test's monkeypatched target is honored.
 DB_POOL_ENABLED = os.environ.get("IH_DB_POOL", "1").lower() in ("1", "true", "yes")
+
+# Observability. LOG_LEVEL controls verbosity; ERROR_DSN is an OPT-IN hook for
+# an error-tracking service — unset means nothing leaves the machine.
+LOG_LEVEL = os.environ.get("IH_LOG_LEVEL", "info")
+ERROR_DSN = os.environ.get("IH_ERROR_DSN", "")
 PROMPTS_DIR = Path(__file__).resolve().parent.parent / "prompts"
 
 OFFLINE = os.environ.get("IH_OFFLINE", "").lower() in ("1", "true", "yes")

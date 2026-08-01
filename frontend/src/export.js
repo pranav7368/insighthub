@@ -1,11 +1,16 @@
-import { toPng } from "html-to-image";
-import jsPDF from "jspdf";
+// PNG / PDF export.
+//
+// html-to-image and jsPDF are ~350 kB together and are needed only when
+// someone actually clicks Export — which most sessions never do. They are
+// imported dynamically so Vite splits them into their own chunk and the
+// dashboard's first paint does not pay for them.
 
 // Elements marked .no-export (e.g. the export buttons themselves) are skipped
 // so they don't appear in the captured image.
 const skipChrome = (node) => !(node.classList && node.classList.contains("no-export"));
 
 async function capture(node) {
+  const { toPng } = await import("html-to-image");
   const bg = getComputedStyle(document.body).backgroundColor || "#ffffff";
   return toPng(node, {
     backgroundColor: bg,
@@ -31,6 +36,8 @@ export async function exportPng(node, name) {
 
 export async function exportPdf(node, name) {
   const dataUrl = await capture(node);
+  const { default: jsPDF } = await import("jspdf");
+
   const img = new Image();
   await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = dataUrl; });
 

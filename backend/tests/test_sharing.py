@@ -27,8 +27,8 @@ SALES = [["date", "branch", "revenue"],
 
 @pytest.fixture()
 def ds(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_b', 'B')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
     return con, "ws_a", res.dataset_id
 
@@ -47,7 +47,7 @@ def test_share_pins_a_view(ds):
     con, ws, dsid = ds
     v = create_view(con, ws, dsid, "Delhi", {"filters": {"branch": "Delhi"}, "hidden_sections": ["treemap"]})
     share = create_share(con, ws, dsid, view_id=v["view_id"])
-    _, _, cfg = resolve_share_dashboard_config(con, share["token"])
+    _, _, cfg, _ = resolve_share_dashboard_config(con, share["token"])
     assert cfg["filters"] == {"branch": "Delhi"} and cfg["hidden_sections"] == ["treemap"]
 
 

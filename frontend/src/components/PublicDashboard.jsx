@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getPublicDashboard } from "../api";
 import { exportPdf, exportPng } from "../export";
 import { mappableFraction } from "../geo";
+import { orderSections } from "../sections";
 import KpiCard from "./KpiCard";
 import GrowthStrip from "./GrowthStrip";
 import InsightsPanel from "./InsightsPanel";
@@ -62,6 +63,90 @@ export default function PublicDashboard({ token }) {
     ([, bd]) => (bd.data?.length || 0) >= 2 && mappableFraction((bd.data || []).map((d) => d.name)) >= 0.6
   );
 
+  // Same section set and ordering rules as the private dashboard, so a shared
+  // link reproduces the arrangement its author saved.
+  const sections = orderSections(
+    [
+      {
+        key: "kpis",
+        node: (
+          <div className="kpi-row">
+            {dashboard.kpis.map((kpi) => (
+              <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure} onSelect={noop} />
+            ))}
+          </div>
+        ),
+      },
+      { key: "growth", node: <GrowthStrip growth={dashboard.growth} measure={measure} /> },
+      { key: "insights", node: <InsightsPanel insights={dashboard.insights} /> },
+      {
+        key: "forecast",
+        node: measure && (
+          <ForecastChart measure={measure} subtype={subtypeOf(measure)}
+            forecast={dashboard.forecasts?.[measure]} anomalies={dashboard.anomalies?.[measure]} />
+        ),
+      },
+      {
+        key: "breakdowns",
+        node: (
+          <div className="chart-grid">
+            {Object.entries(dashboard.breakdowns).map(([dim, bd]) => (
+              <BreakdownChart key={dim} dimensionName={dim} breakdown={bd}
+                measure={measure} subtype={subtypeOf(measure)} onSelect={noop} />
+            ))}
+            {Object.entries(dashboard.breakdowns).slice(0, 1).map(([dim, bd]) => (
+              <ContributionDonut key={`donut-${dim}`} dimensionName={dim} breakdown={bd}
+                subtype={subtypeOf(measure)} onSelect={noop} />
+            ))}
+          </div>
+        ),
+      },
+      {
+        key: "map",
+        node: geoEntry && (
+          <MapChart dimensionName={geoEntry[0]} breakdown={geoEntry[1]}
+            measure={measure} subtype={subtypeOf(measure)} />
+        ),
+      },
+      {
+        key: "pareto",
+        node: dashboard.pareto && dashboard.pareto.total_categories > 2 && (
+          <ParetoChart pareto={dashboard.pareto} />
+        ),
+      },
+      {
+        key: "treemap",
+        node: dashboard.treemap && <TreemapChart treemap={dashboard.treemap} subtype={subtypeOf(measure)} />,
+      },
+      {
+        key: "correlations",
+        node: dashboard.correlations && (
+          <div className="chart-grid">
+            <CorrelationHeatmap correlations={dashboard.correlations}
+              activePair={dashboard.scatter ? { x: dashboard.scatter.x, y: dashboard.scatter.y } : null}
+              onSelect={noop} />
+            <ScatterPlot scatter={dashboard.scatter} />
+          </div>
+        ),
+      },
+      {
+        key: "distributions",
+        node: distNames.length > 0 && (
+          <div className="dist-section">
+            <div className="section-title">Distribution of each measure</div>
+            <div className="dist-grid">
+              {distNames.map((name) => (
+                <DistributionCard key={name} name={name} dist={dashboard.distributions[name]} />
+              ))}
+            </div>
+          </div>
+        ),
+      },
+      { key: "profile", node: <DataProfile profile={dashboard.data_profile} /> },
+    ].filter((s) => s.node && show(s.key)),
+    data.meta?.section_order || []
+  );
+
   return (
     <div className="public-shell">
       <header className="public-header">
@@ -87,69 +172,7 @@ export default function PublicDashboard({ token }) {
           </div>
         </div>
 
-        {show("kpis") && (
-          <div className="kpi-row">
-            {dashboard.kpis.map((kpi) => (
-              <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure} onSelect={noop} />
-            ))}
-          </div>
-        )}
-
-        {show("growth") && <GrowthStrip growth={dashboard.growth} measure={measure} />}
-        {show("insights") && <InsightsPanel insights={dashboard.insights} />}
-
-        {show("forecast") && measure && (
-          <ForecastChart measure={measure} subtype={subtypeOf(measure)}
-            forecast={dashboard.forecasts?.[measure]} anomalies={dashboard.anomalies?.[measure]} />
-        )}
-
-        {show("breakdowns") && (
-          <div className="chart-grid">
-            {Object.entries(dashboard.breakdowns).map(([dim, bd]) => (
-              <BreakdownChart key={dim} dimensionName={dim} breakdown={bd}
-                measure={measure} subtype={subtypeOf(measure)} onSelect={noop} />
-            ))}
-            {Object.entries(dashboard.breakdowns).slice(0, 1).map(([dim, bd]) => (
-              <ContributionDonut key={`donut-${dim}`} dimensionName={dim} breakdown={bd}
-                subtype={subtypeOf(measure)} onSelect={noop} />
-            ))}
-          </div>
-        )}
-
-        {show("map") && geoEntry && (
-          <MapChart dimensionName={geoEntry[0]} breakdown={geoEntry[1]}
-            measure={measure} subtype={subtypeOf(measure)} />
-        )}
-
-        {show("pareto") && dashboard.pareto && dashboard.pareto.total_categories > 2 && (
-          <ParetoChart pareto={dashboard.pareto} />
-        )}
-
-        {show("treemap") && dashboard.treemap && (
-          <TreemapChart treemap={dashboard.treemap} subtype={subtypeOf(measure)} />
-        )}
-
-        {show("correlations") && dashboard.correlations && (
-          <div className="chart-grid">
-            <CorrelationHeatmap correlations={dashboard.correlations}
-              activePair={dashboard.scatter ? { x: dashboard.scatter.x, y: dashboard.scatter.y } : null}
-              onSelect={noop} />
-            <ScatterPlot scatter={dashboard.scatter} />
-          </div>
-        )}
-
-        {show("distributions") && distNames.length > 0 && (
-          <div className="dist-section">
-            <div className="section-title">Distribution of each measure</div>
-            <div className="dist-grid">
-              {distNames.map((name) => (
-                <DistributionCard key={name} name={name} dist={dashboard.distributions[name]} />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {show("profile") && <DataProfile profile={dashboard.data_profile} />}
+        {sections.map(({ key, node }) => <div className="dash-section" key={key}>{node}</div>)}
       </div>
 
       <footer className="public-footer">
