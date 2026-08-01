@@ -33,7 +33,7 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Schema migrations** | Versioned ledger so a released build never meets a database it cannot read | `core/migrations.py` |
 | **Accessibility** | WCAG 2.1 AA: zero axe-core violations across login, dashboard, tour and every admin dialog, in light and dark. Structural rules regression-tested in CI | `frontend/src/a11y.test.jsx` |
 
-Verified by **479 backend tests** and **75 frontend tests**, including a source-guard test that fails
+Verified by **483 backend tests** and **75 frontend tests**, including a source-guard test that fails
 if any module queries a dataset table without going through the row-level
 security rewrite.
 
@@ -158,7 +158,9 @@ every document at once, and they are written to match what the code actually
 does — the AI boundary, the real subprocessors, the retention mechanism.
 
 **They have not been reviewed by a lawyer and must not be published until they
-are.** `python scripts/build_legal.py --check` fails while any placeholder
+are.** They block nothing in the meantime: no application code reads them, and
+`python scripts/build_legal.py --dev` renders readable pages from obvious
+placeholders for development, which can never satisfy the publish gate. `python scripts/build_legal.py --check` fails while any placeholder
 remains, and that check runs in the test suite, so an unfinished draft cannot
 reach a website by accident.
 

@@ -153,6 +153,57 @@ def test_build_script_reports_unfinished_drafts():
         assert result.returncode == 0, result.stderr
 
 
+def test_dev_values_can_never_be_published():
+    """The load-bearing property of --dev.
+
+    Development placeholders exist so the pages can be linked and read while
+    building, without a lawyer. If they could satisfy the publish gate, "we'll
+    fill it in later" would quietly become the live policy — which is exactly
+    how a fake company address ends up on a real website.
+    """
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "build_legal.py"), "--dev", "--check"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode != 0, "--dev must never pass the publish gate"
+    assert "never publishable" in result.stderr
+
+
+def test_dev_build_is_unmistakably_marked():
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "build_legal.py"), "--dev"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    for name in DOCUMENTS:
+        text = (LEGAL / "build" / name).read_text(encoding="utf-8")
+        assert "DEVELOPMENT BUILD — NOT A REAL POLICY" in text
+        assert "PLACEHOLDERS, NOT REAL" in text
+
+
+def test_dev_values_are_obviously_fake():
+    """Nobody should be able to mistake a placeholder for a real detail —
+    and the reserved .invalid domain means a stray script cannot email a real
+    person by accident (RFC 2606)."""
+    dev = json.loads((LEGAL / "company.dev.json").read_text(encoding="utf-8"))
+    for key, value in dev.items():
+        if key.endswith("_EMAIL") or key in ("CONTACT_EMAIL",):
+            assert value.endswith(".invalid"), f"{key} must use a reserved domain"
+    assert "NOT A REAL ENTITY" in dev["COMPANY_LEGAL_NAME"]
+
+
+def test_dev_and_real_value_files_stay_in_step():
+    """A token added to one must be added to the other, or --dev breaks the
+    day someone needs it."""
+    real = json.loads((LEGAL / "company.json").read_text(encoding="utf-8"))
+    dev = json.loads((LEGAL / "company.dev.json").read_text(encoding="utf-8"))
+    strip = lambda d: {k for k in d if not k.startswith("_")}   # noqa: E731
+    assert strip(real) == strip(dev), (
+        f"only in company.json: {strip(real) - strip(dev)}; "
+        f"only in company.dev.json: {strip(dev) - strip(real)}"
+    )
+
+
 def test_build_script_renders_all_documents(tmp_path, monkeypatch):
     result = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "build_legal.py")],

@@ -27,11 +27,30 @@ out of sync, which is the usual way legal pages go stale and become untrue.
 
 ```bash
 python scripts/build_legal.py          # render into docs/legal/build/
+python scripts/build_legal.py --dev    # render with obvious placeholders
 python scripts/build_legal.py --check  # fail if anything is unfilled
 ```
 
 `backend/tests/test_legal_pack.py` runs that check in CI, so a document with a
 `TODO` in it cannot be published by accident.
+
+### Working without a lawyer yet
+
+You do not need one to keep building. **Nothing in the application reads these
+files**, and the test suite is green with every placeholder still in place — so
+this can sit here until you are ready.
+
+When you want to *see* the pages — link them from a footer, read them through,
+put them in a demo — use `--dev`. It renders from `company.dev.json`, whose
+values are deliberately, obviously fake: the company is
+"EXAMPLE TEST COMPANY — NOT A REAL ENTITY", and every address uses the reserved
+`.invalid` domain, which can never be registered, so nothing can email a real
+person by accident.
+
+**`--dev` can never be published.** `--dev --check` refuses outright, and every
+dev-built document carries a loud banner. That is deliberate: if placeholders
+could satisfy the publish gate, "we'll fill it in later" is exactly how a fake
+company address ends up on a live website.
 
 ---
 
