@@ -782,23 +782,39 @@ def list_datasets(principal: Principal = Depends(get_principal)):
     ]
 
 
+def _ingest_blocking(workspace_id: str, user_id: str, filename: str, content: bytes):
+    """Parse and load a file. Pure blocking work — parsing, DuckDB writes — so
+    it must never run on the event loop. Kept as one unit so the quota check,
+    the load and the audit entry all share a connection."""
+    con = db.connect()
+    check_quota(con, workspace_id, "datasets")
+    result = ingest_upload(con, workspace_id, filename, content)
+    db.audit(con, workspace_id, user_id, "upload", filename)
+    return result
+
+
 @app.post("/api/datasets/upload")
 async def upload(file: UploadFile, principal: Principal = Depends(require_editor)):
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in config.ALLOWED_UPLOAD_SUFFIXES:
         raise HTTPException(status_code=400, detail=f"unsupported file type {suffix!r}")
-    content = await file.read()
+    # even assembling the bytes is worth keeping off the loop for a large file
+    content = await asyncio.to_thread(file.file.read)
     if len(content) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="file too large")
-    con = db.connect()
     try:
-        check_quota(con, principal.workspace_id, "datasets")
-        result = ingest_upload(con, principal.workspace_id, file.filename, content)
+        # to_thread, not a direct call: this handler is async only so it can
+        # await file.read(), and ingesting a few MB inline froze EVERY other
+        # request for the duration — measured at 2s of stalled health checks
+        # during a 3.5 MB upload. Sync `def` endpoints are safe because FastAPI
+        # offloads them itself; async ones have to do it explicitly.
+        result = await asyncio.to_thread(
+            _ingest_blocking, principal.workspace_id, principal.user_id,
+            file.filename, content)
     except QuotaError as exc:
         raise HTTPException(status_code=402, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    db.audit(con, principal.workspace_id, principal.user_id, "upload", file.filename)
     return {
         "dataset_id": result.dataset_id, "name": result.name, "kind": result.kind,
         "row_count": result.row_count, "chunks": result.chunks, "warnings": result.warnings,
@@ -898,17 +914,24 @@ async def append_data(dataset_id: str, file: UploadFile, mode: str = Form("appen
     suffix = Path(file.filename or "").suffix.lower()
     if suffix not in config.ALLOWED_UPLOAD_SUFFIXES:
         raise HTTPException(status_code=400, detail=f"unsupported file type {suffix!r}")
-    content = await file.read()
+    content = await asyncio.to_thread(file.file.read)
     if len(content) > config.MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="file too large")
-    con = db.connect()
+
+    def work():
+        con = db.connect()
+        result = append_to_dataset(con, principal.workspace_id, dataset_id,
+                                   file.filename, content, mode)
+        db.audit(con, principal.workspace_id, principal.user_id, "append",
+                 f"{file.filename} ({mode})")
+        return result
+
     try:
-        result = append_to_dataset(con, principal.workspace_id, dataset_id, file.filename, content, mode)
+        result = await asyncio.to_thread(work)      # blocking, like upload
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    db.audit(con, principal.workspace_id, principal.user_id, "append", f"{file.filename} ({mode})")
     return result
 
 
