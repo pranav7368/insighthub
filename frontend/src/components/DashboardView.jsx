@@ -123,7 +123,8 @@ export default function DashboardView({ datasetId }) {
       const name = dashboard?.dataset?.name || "dashboard";
       if (kind === "png") await exportPng(contentRef.current, name);
       else await exportPdf(contentRef.current, name);
-    } catch (e) {
+    } catch {
+      // the underlying error is not actionable for the user
       setError("Export failed. Try again.");
     } finally {
       setExporting(null);

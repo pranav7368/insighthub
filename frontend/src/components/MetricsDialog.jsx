@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createMetric, deleteMetric, errorText, getSchema, listMetrics } from "../api";
 import { humanLabel } from "../format";
 
@@ -49,7 +49,10 @@ export default function MetricsDialog({ datasetId, onClose, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  const load = () => listMetrics(datasetId).then(setMetrics).catch(() => setMetrics([]));
+  const load = useCallback(
+    () => listMetrics(datasetId).then(setMetrics).catch(() => setMetrics([])),
+    [datasetId],
+  );
   useEffect(() => {
     load();
     getSchema(datasetId)
@@ -63,7 +66,7 @@ export default function MetricsDialog({ datasetId, onClose, onChanged }) {
         setDen((s) => ({ ...s, column: s.column || first }));
       })
       .catch(() => setColumns([]));
-  }, [datasetId]);
+  }, [datasetId, load]);
 
   const create = async (e) => {
     e.preventDefault();

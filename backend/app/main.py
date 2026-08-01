@@ -6,6 +6,7 @@ another tenant's data by guessing an id.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -71,7 +72,85 @@ from .ingest.templates import (
 from .core.sqlsafe import safe_identifier, safe_table_name
 from .qa.engine import answer_question
 
-app = FastAPI(title="InsightHub API", version="0.1.0")
+
+# --------------------------------------------------- startup / shutdown ---
+# Defined before the app so it can be passed to FastAPI(lifespan=...).
+
+def _production_issues() -> list[str]:
+    """Config problems that make a production deployment unsafe."""
+    issues = []
+    if config.ENV == "production":
+        if config.SECRET_KEY.startswith("dev-only-insecure"):
+            issues.append("IH_SECRET_KEY is still the insecure development default")
+        if not config.CORS_ORIGINS.strip():
+            issues.append("IH_CORS_ORIGINS is not set — CORS would fall back to permissive localhost")
+    return issues
+
+
+def _enforce_secure_config():
+    issues = _production_issues()
+    if issues:
+        raise RuntimeError("refusing to start in production: " + "; ".join(issues))
+    if config.SECRET_KEY.startswith("dev-only-insecure"):
+        print("[ih][WARNING] IH_SECRET_KEY is the insecure default - set a real secret before any real use.")
+
+
+# Background auto-refresh for live data sources. Blocking DuckDB/HTTP work runs
+# in a worker thread so the event loop is never blocked; each source is synced
+# independently and its own errors are recorded (never crash the loop).
+def _run_scheduled_work() -> None:
+    con = db.connect()
+    for source_id, workspace_id in due_sources(con):
+        try:
+            sync_source(con, workspace_id, source_id)
+        except Exception:  # already recorded on the source row
+            pass
+    try:
+        run_due_alerts(con)  # each alert isolates its own errors
+    except Exception:
+        pass
+    try:
+        # only workspaces that configured a period are touched
+        retention.sweep_all(con)
+    except Exception:
+        pass
+
+
+async def _scheduler_loop() -> None:
+    while True:
+        await asyncio.sleep(config.SCHEDULER_TICK_SECONDS)
+        try:
+            await asyncio.to_thread(_run_scheduled_work)
+        except Exception as exc:  # never let the loop die
+            print(f"[ih][scheduler] {exc}")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Startup and shutdown.
+
+    Replaces the deprecated @app.on_event handlers, which FastAPI will remove.
+    The scheduler task is now cancelled on shutdown rather than left dangling —
+    under the old handlers nothing ever stopped it, so a test client or a
+    reload leaked a task that kept touching the database.
+    """
+    _enforce_secure_config()
+
+    scheduler: asyncio.Task | None = None
+    if config.ENABLE_SCHEDULER:
+        scheduler = asyncio.create_task(_scheduler_loop())
+
+    yield
+
+    if scheduler is not None:
+        scheduler.cancel()
+        try:
+            await scheduler
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(title="InsightHub API", version="0.1.0", lifespan=lifespan)
 
 # CORS: an explicit allow-list of origins in production; a permissive localhost
 # regex only when none is configured (local dev).
@@ -149,60 +228,6 @@ async def _rate_limit_and_headers(request: Request, call_next):
     return response
 
 
-def _production_issues() -> list[str]:
-    """Config problems that make a production deployment unsafe."""
-    issues = []
-    if config.ENV == "production":
-        if config.SECRET_KEY.startswith("dev-only-insecure"):
-            issues.append("IH_SECRET_KEY is still the insecure development default")
-        if not config.CORS_ORIGINS.strip():
-            issues.append("IH_CORS_ORIGINS is not set — CORS would fall back to permissive localhost")
-    return issues
-
-
-@app.on_event("startup")
-def _enforce_secure_config():
-    issues = _production_issues()
-    if issues:
-        raise RuntimeError("refusing to start in production: " + "; ".join(issues))
-    if config.SECRET_KEY.startswith("dev-only-insecure"):
-        print("[ih][WARNING] IH_SECRET_KEY is the insecure default - set a real secret before any real use.")
-
-
-# Background auto-refresh for live data sources. Blocking DuckDB/HTTP work runs
-# in a worker thread so the event loop is never blocked; each source is synced
-# independently and its own errors are recorded (never crash the loop).
-def _run_scheduled_work() -> None:
-    con = db.connect()
-    for source_id, workspace_id in due_sources(con):
-        try:
-            sync_source(con, workspace_id, source_id)
-        except Exception:  # already recorded on the source row
-            pass
-    try:
-        run_due_alerts(con)  # each alert isolates its own errors
-    except Exception:
-        pass
-    try:
-        # only workspaces that configured a period are touched
-        retention.sweep_all(con)
-    except Exception:
-        pass
-
-
-async def _scheduler_loop() -> None:
-    while True:
-        await asyncio.sleep(config.SCHEDULER_TICK_SECONDS)
-        try:
-            await asyncio.to_thread(_run_scheduled_work)
-        except Exception as exc:  # never let the loop die
-            print(f"[ih][scheduler] {exc}")
-
-
-@app.on_event("startup")
-async def _start_scheduler():
-    if config.ENABLE_SCHEDULER:
-        asyncio.create_task(_scheduler_loop())
 
 
 # ----------------------------------------------------------- auth --------

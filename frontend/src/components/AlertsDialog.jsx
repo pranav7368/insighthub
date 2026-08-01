@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { createAlert, deleteAlert, errorText, getSchema, listAlerts, setAlertEnabled, testAlert } from "../api";
 import { humanLabel } from "../format";
 
@@ -23,7 +23,10 @@ export default function AlertsDialog({ datasetId, onClose }) {
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
 
-  const load = () => listAlerts(datasetId).then(setAlerts).catch(() => setAlerts([]));
+  const load = useCallback(
+    () => listAlerts(datasetId).then(setAlerts).catch(() => setAlerts([])),
+    [datasetId],
+  );
   useEffect(() => {
     load();
     getSchema(datasetId)
@@ -33,7 +36,7 @@ export default function AlertsDialog({ datasetId, onClose }) {
         setForm((f) => ({ ...f, measure: f.measure || m[0]?.name || "" }));
       })
       .catch(() => setMeasures([]));
-  }, [datasetId]);
+  }, [datasetId, load]);
 
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 

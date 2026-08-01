@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { appendData, errorText, getBatches, rollbackBatch } from "../api";
 
 export default function UpdateData({ datasetId, datasetName, onClose, onChanged }) {
@@ -10,8 +10,11 @@ export default function UpdateData({ datasetId, datasetName, onClose, onChanged 
   const [undoing, setUndoing] = useState(null);
   const inputRef = useRef(null);
 
-  const loadBatches = () => getBatches(datasetId).then(setBatches).catch(() => {});
-  useEffect(() => { loadBatches(); }, [datasetId]);
+  const loadBatches = useCallback(
+    () => getBatches(datasetId).then(setBatches).catch(() => {}),
+    [datasetId],
+  );
+  useEffect(() => { loadBatches(); }, [loadBatches]);
 
   const pickFile = async (e) => {
     const file = e.target.files?.[0];
