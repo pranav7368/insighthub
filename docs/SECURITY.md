@@ -31,7 +31,7 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Structured logging** | JSON, request-correlated, credential-redacted; identifiers logged, never row contents | `core/observability.py` |
 | **Schema migrations** | Versioned ledger so a released build never meets a database it cannot read | `core/migrations.py` |
 
-Verified by **446 backend tests** and **57 frontend tests**, including a source-guard test that fails
+Verified by **446 backend tests** and **69 frontend tests**, including a source-guard test that fails
 if any module queries a dataset table without going through the row-level
 security rewrite.
 

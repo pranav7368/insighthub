@@ -3,6 +3,7 @@ import {
   createRlsRule, deleteRlsRule, errorText, getPrivacy, getSchema,
   listMembers, listRlsRules, setPrivacy,
 } from "../api";
+import RetentionPanel from "./RetentionPanel";
 
 const KINDS = [
   ["email", "Email"],
@@ -202,6 +203,10 @@ export default function AccessDialog({ datasetId, datasetName, onClose }) {
             </tbody>
           </table>
         )}
+
+        {/* ------------------------------------------------- retention -- */}
+        <div className="section-title access-section">Retention</div>
+        <RetentionPanel />
 
         {unpoliced.length > 0 && (
           <details className="access-more">

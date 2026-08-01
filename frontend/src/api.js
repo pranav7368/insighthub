@@ -232,6 +232,18 @@ export const createRlsRule = (datasetId, body) =>
 export const deleteRlsRule = (ruleId) =>
   client.delete(`/rls/${ruleId}`).then((r) => r.data);
 
+// --- Retention (admin, workspace-wide) ---
+export const getRetention = () => client.get("/privacy/retention").then((r) => r.data);
+
+export const previewRetention = (body) =>
+  client.post("/privacy/retention/preview", body).then((r) => r.data);
+
+export const setRetention = (body) =>
+  client.put("/privacy/retention", body).then((r) => r.data);
+
+export const runRetention = () =>
+  client.post("/privacy/retention/run").then((r) => r.data);
+
 // --- PII masking policy (admin) ---
 export const getPrivacy = (datasetId) =>
   client.get(`/datasets/${datasetId}/privacy`).then((r) => r.data);
