@@ -26,8 +26,8 @@ SALES = [["date", "branch", "revenue"],
 
 @pytest.fixture()
 def ds(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_b', 'B')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
     return con, "ws_a", res.dataset_id
 

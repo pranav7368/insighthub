@@ -43,7 +43,9 @@ from .analytics.joins import (
     rebuild_join, suggest_join_keys,
 )
 from .qa.llm import provider_status
-from .api.deps import Principal, get_principal, require_admin, require_editor
+from .api.deps import (
+    Principal, get_principal, get_principal_for_mfa_setup, require_admin, require_editor,
+)
 from .members import (
     MemberError, MemberNotFound, change_password, create_member, delete_member,
     list_members, update_member_role,
@@ -332,7 +334,7 @@ class MfaDisableBody(BaseModel):
 
 
 @app.post("/api/auth/mfa/setup")
-def mfa_setup(principal: Principal = Depends(get_principal)):
+def mfa_setup(principal: Principal = Depends(get_principal_for_mfa_setup)):
     """Begin enrolment: mint a secret and return the otpauth:// URI.
 
     The factor is NOT active yet — mfa_enabled stays false until a code proves
@@ -350,7 +352,7 @@ def mfa_setup(principal: Principal = Depends(get_principal)):
 
 
 @app.post("/api/auth/mfa/enable")
-def mfa_enable(body: MfaEnableBody, principal: Principal = Depends(get_principal)):
+def mfa_enable(body: MfaEnableBody, principal: Principal = Depends(get_principal_for_mfa_setup)):
     """Confirm enrolment with a live code, then hand back the recovery codes.
 
     They are shown exactly once — stored hashed, so we genuinely cannot show
@@ -398,7 +400,7 @@ def mfa_disable(body: MfaDisableBody, principal: Principal = Depends(get_princip
 
 
 @app.get("/api/auth/mfa")
-def mfa_status(principal: Principal = Depends(get_principal)):
+def mfa_status(principal: Principal = Depends(get_principal_for_mfa_setup)):
     con = db.connect()
     row = con.execute("SELECT mfa_enabled FROM users WHERE user_id = ?",
                       [principal.user_id]).fetchone()
@@ -494,6 +496,51 @@ def erase_workspace_data(body: EraseWorkspaceBody, principal: Principal = Depend
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+class WorkspaceSecurityBody(BaseModel):
+    require_mfa: bool
+
+
+@app.get("/api/workspace/security")
+def get_workspace_security(principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    row = con.execute("SELECT COALESCE(require_mfa, false) FROM workspaces WHERE workspace_id = ?",
+                      [principal.workspace_id]).fetchone()
+    total, enrolled = con.execute(
+        """SELECT count(*), count(*) FILTER (WHERE COALESCE(mfa_enabled, false))
+           FROM users WHERE workspace_id = ?""",
+        [principal.workspace_id],
+    ).fetchone()
+    return {"require_mfa": bool(row and row[0]), "members": total, "members_with_mfa": enrolled}
+
+
+@app.put("/api/workspace/security")
+def set_workspace_security(body: WorkspaceSecurityBody,
+                           principal: Principal = Depends(require_admin)):
+    """Require a second factor for everyone in the workspace.
+
+    Turning it on requires the admin to have enrolled first. Not a lockout —
+    members without a factor can still reach setup — but an admin who turns
+    this on and then cannot administer until they enrol is a confusing first
+    five minutes, and it proves the flow works before it is imposed on others.
+    """
+    con = db.connect()
+    if body.require_mfa:
+        mine = con.execute("SELECT COALESCE(mfa_enabled, false) FROM users WHERE user_id = ?",
+                           [principal.user_id]).fetchone()
+        if not (mine and mine[0]):
+            raise HTTPException(
+                status_code=400,
+                detail="set up two-factor authentication on your own account first, "
+                       "so you can confirm the flow before requiring it of everyone",
+            )
+    con.execute("UPDATE workspaces SET require_mfa = ? WHERE workspace_id = ?",
+                [bool(body.require_mfa), principal.workspace_id])
+    db.audit(con, principal.workspace_id, principal.user_id,
+             "workspace_mfa_required" if body.require_mfa else "workspace_mfa_optional",
+             principal.workspace_id)
+    return get_workspace_security(principal)
+
+
 class RetentionBody(BaseModel):
     audit_days: int = 0
     archive_days: int = 0
@@ -551,7 +598,7 @@ def run_retention(principal: Principal = Depends(require_admin)):
 
 
 @app.post("/api/auth/revoke-sessions")
-def revoke_sessions(principal: Principal = Depends(get_principal)):
+def revoke_sessions(principal: Principal = Depends(get_principal_for_mfa_setup)):
     """Sign out everywhere. Invalidates every token issued to this account,
     including the one making the request — the remedy for a laptop left on a
     train, which a self-contained JWT otherwise has no answer for."""

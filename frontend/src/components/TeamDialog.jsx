@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
-import { addMember, changePassword, deleteMember, errorText, listMembers, updateMemberRole } from "../api";
+import {
+  addMember, changePassword, deleteMember, errorText, getWorkspaceSecurity,
+  listMembers, setWorkspaceSecurity, updateMemberRole,
+} from "../api";
 
 const ROLES = [
   { value: "admin", label: "Admin — full control + team" },
@@ -17,8 +20,14 @@ export default function TeamDialog({ onClose }) {
   const [error, setError] = useState(null);
   const [invited, setInvited] = useState(null);   // {email, temp_password}
   const [pw, setPw] = useState({ open: false, old: "", next: "", note: null });
+  const [security, setSecurity] = useState(null);
 
-  const load = () => listMembers().then(setMembers).catch(() => setMembers([]));
+  const load = () => {
+    listMembers().then(setMembers).catch(() => setMembers([]));
+    // the requirement lives beside the member list because it is about
+    // the same people; a failure here must not blank the whole dialog
+    getWorkspaceSecurity().then(setSecurity).catch(() => setSecurity(null));
+  };
   useEffect(() => { load(); }, []);
 
   const invite = async (e) => {
@@ -60,6 +69,12 @@ export default function TeamDialog({ onClose }) {
     }
   };
 
+  const toggleRequireMfa = async (value) => {
+    setError(null);
+    try { setSecurity(await setWorkspaceSecurity(value)); }
+    catch (err) { setError(errorText(err, "Could not change the requirement.")); }
+  };
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal modal--wide" onClick={(e) => e.stopPropagation()}>
@@ -71,6 +86,25 @@ export default function TeamDialog({ onClose }) {
           Invite teammates and set what they can do. <b>Admins</b> manage the team, <b>editors</b> can
           change data and dashboards, <b>viewers</b> are read-only.
         </p>
+
+        {security && (
+          <div className="team-security">
+            <label className="views-check">
+              <input type="checkbox" checked={security.require_mfa}
+                onChange={(e) => toggleRequireMfa(e.target.checked)} />
+              <span>
+                <b>Require two-factor authentication</b> for everyone in this workspace
+              </span>
+            </label>
+            <p className="access-note">
+              {security.members_with_mfa} of {security.members} member
+              {security.members === 1 ? "" : "s"} have it set up.
+              {security.require_mfa
+                ? " Anyone without it can still sign in, but only to set it up."
+                : ""}
+            </p>
+          </div>
+        )}
 
         <form className="src-form" onSubmit={invite}>
           <div className="src-field src-field--grow">

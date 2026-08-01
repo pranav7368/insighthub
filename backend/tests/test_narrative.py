@@ -18,7 +18,7 @@ def _csv(rows):
 
 @pytest.fixture()
 def ds(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     rows = [["date", "branch", "revenue"]]
     for m in range(1, 13):
         rows.append([f"2025-{m:02d}-05", "Delhi", str(1000 + 100 * m)])

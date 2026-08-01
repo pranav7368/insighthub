@@ -125,14 +125,14 @@ def test_only_admins_manage_rules(env):
 # -------------------------------------------------- predicate semantics ---
 
 def test_no_rules_means_unrestricted(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
     where, params = build_predicate(con, "ws_a", "usr_nobody", res.dataset_id)
     assert where == "" and params == []
 
 
 def test_same_column_rules_widen_different_columns_narrow(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     con.execute("INSERT INTO users (user_id, workspace_id, email, password_hash, role) "
                 "VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
@@ -148,7 +148,7 @@ def test_same_column_rules_widen_different_columns_narrow(con):
 
 def test_broken_rule_fails_closed(con):
     """A rule naming a column the dataset no longer has must deny, not ignore."""
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     con.execute("INSERT INTO users (user_id, workspace_id, email, password_hash, role) "
                 "VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
@@ -162,8 +162,8 @@ def test_broken_rule_fails_closed(con):
 
 
 def test_rules_are_workspace_scoped(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_b', 'B')")
     con.execute("INSERT INTO users (user_id, workspace_id, email, password_hash, role) "
                 "VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))
@@ -175,7 +175,7 @@ def test_rules_are_workspace_scoped(con):
 
 
 def test_bad_operator_rejected(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     con.execute("INSERT INTO users (user_id, workspace_id, email, password_hash, role) "
                 "VALUES ('usr_a', 'ws_a', 'a@x.com', 'h', 'viewer')")
     res = ingest_upload(con, "ws_a", "sales.csv", _csv(SALES))

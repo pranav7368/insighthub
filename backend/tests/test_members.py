@@ -11,8 +11,8 @@ from app.core.security import hash_password
 
 @pytest.fixture()
 def ws(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_b', 'B')")
     con.execute("INSERT INTO users (user_id, workspace_id, email, password_hash, role) VALUES "
                 "('usr_admin', 'ws_a', 'admin@a.com', ?, 'admin')", [hash_password("origadmin1")])
     return con, "ws_a", "usr_admin"

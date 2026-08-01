@@ -232,6 +232,13 @@ export const createRlsRule = (datasetId, body) =>
 export const deleteRlsRule = (ruleId) =>
   client.delete(`/rls/${ruleId}`).then((r) => r.data);
 
+// --- Workspace security (admin) ---
+export const getWorkspaceSecurity = () =>
+  client.get("/workspace/security").then((r) => r.data);
+
+export const setWorkspaceSecurity = (require_mfa) =>
+  client.put("/workspace/security", { require_mfa }).then((r) => r.data);
+
 // --- Retention (admin, workspace-wide) ---
 export const getRetention = () => client.get("/privacy/retention").then((r) => r.data);
 

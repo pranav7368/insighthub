@@ -63,13 +63,15 @@ class ScriptedLLM:
 
 @pytest.fixture()
 def seeded(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     con.execute("""INSERT INTO datasets
         (dataset_id, workspace_id, name, source_file, kind, table_name, row_count, char_count)
         VALUES ('d1', 'ws_a', 'Report', 'r.txt', 'document', NULL, 0, 100)""")
-    con.execute("INSERT INTO chunks VALUES ('c1', 'ws_a', 'd1', 1, 'page 1', 'Revenue grew 12% reaching $500,000 total.')")
+    con.execute("INSERT INTO chunks (chunk_id, workspace_id, dataset_id, position, locator, text) "
+                "VALUES ('c1', 'ws_a', 'd1', 1, 'page 1', 'Revenue grew 12% reaching $500,000 total.')")
     emb = HashingEmbedder()
-    con.execute("INSERT INTO chunk_embeddings VALUES ('c1', 'ws_a', ?)", [emb.encode(["Revenue grew 12%"])[0].tolist()])
+    con.execute("INSERT INTO chunk_embeddings (chunk_id, workspace_id, embedding) VALUES ('c1', 'ws_a', ?)",
+                [emb.encode(["Revenue grew 12%"])[0].tolist()])
     return con
 
 

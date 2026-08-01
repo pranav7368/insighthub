@@ -116,7 +116,7 @@ def test_date_bounds_normalizes_month_and_is_end_exclusive():
 
 
 def test_dashboard_month_range_filter_works(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     rows = [["date", "branch", "revenue"]]
     for m in range(1, 13):
         rows.append([f"2025-{m:02d}-10", "Delhi", "1000"])
@@ -127,7 +127,7 @@ def test_dashboard_month_range_filter_works(con):
 
 
 def test_dashboard_returns_kpi_delta_and_sparkline(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     rows = [["date", "branch", "revenue"]]
     for m in range(1, 13):
         rows.append([f"2025-{m:02d}-10", "Delhi", str(1000 + 100 * m)])

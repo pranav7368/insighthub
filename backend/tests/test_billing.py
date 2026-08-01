@@ -12,7 +12,7 @@ from app.core import config
 
 @pytest.fixture()
 def ws(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     return con, "ws_a"
 
 

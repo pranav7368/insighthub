@@ -37,7 +37,7 @@ def test_currency_still_wins_for_revenue():
 # ---- quality profiling ----
 
 def _seed(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
     rows = [["date", "branch", "revenue"],
             ["2025-01-05", "Delhi", "1000"],
             ["2025-01-06", "Mumbai", ""],        # missing revenue

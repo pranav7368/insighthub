@@ -53,8 +53,8 @@ def http_csv():
 
 @pytest.fixture()
 def ws(con):
-    con.execute("INSERT INTO workspaces VALUES ('ws_a', 'A', now())")
-    con.execute("INSERT INTO workspaces VALUES ('ws_b', 'B', now())")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_b', 'B')")
     return "ws_a"
 
 

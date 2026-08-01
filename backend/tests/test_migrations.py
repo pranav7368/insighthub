@@ -69,6 +69,7 @@ def test_an_older_database_gains_a_missing_column():
             name         VARCHAR NOT NULL
         )
     """)
+    # positional on purpose: this IS the old four-column table.  positional-insert-ok
     con.execute("INSERT INTO alerts VALUES ('a1', 'ws', 'ds', 'legacy alert')")
 
     def columns():
@@ -86,6 +87,34 @@ def test_an_older_database_gains_a_missing_column():
     # and the existing row survived
     assert con.execute("SELECT name FROM alerts WHERE alert_id = 'a1'").fetchone()[0] == "legacy alert"
     con.close()
+
+
+def test_no_test_uses_a_positional_insert():
+    """Positional INSERTs break every time a table gains a column.
+
+    Adding `workspaces.require_mfa` broke 41 inserts across 19 files at once,
+    and `users.token_epoch` broke four before that — noise that buries the real
+    failure in a migration change. Naming the columns costs nothing and makes a
+    schema addition a non-event for the suite.
+    """
+    import pathlib
+    import re
+
+    marker = "positional-insert" + "-ok"        # split so this line is not a hit
+    offenders = []
+    for path in sorted(pathlib.Path(__file__).resolve().parent.glob("*.py")):
+        lines = path.read_text(encoding="utf-8").split("\n")
+        for i, line in enumerate(lines, 1):
+            if not re.search(r"INSERT\s+INTO\s+\w+\s+VALUES", line, re.IGNORECASE):
+                continue
+            previous = lines[i - 2] if i >= 2 else ""
+            if marker in line or marker in previous:
+                continue        # audited exception, e.g. simulating an old table
+            offenders.append(f"{path.name}:{i}")
+    assert not offenders, (
+        "name the columns in these INSERTs so a new column does not break them: "
+        f"{offenders}"
+    )
 
 
 def test_connect_migrates_automatically(tmp_path, monkeypatch):

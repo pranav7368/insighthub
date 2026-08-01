@@ -132,6 +132,11 @@ MIGRATIONS: tuple[Migration, ...] = (
                )""",
         ),
     ),
+    Migration(
+        id="0008_workspace_require_mfa",
+        description="admins can require a second factor for the whole workspace",
+        statements=(_add_column("workspaces", "require_mfa", "BOOLEAN DEFAULT false"),),
+    ),
 )
 
 

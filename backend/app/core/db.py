@@ -22,6 +22,10 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS workspaces (
     workspace_id VARCHAR PRIMARY KEY,
     name         VARCHAR NOT NULL,
+    -- when true, a member without a second factor may reach the MFA setup
+    -- endpoints and nothing else (see api/deps.py). Enforced in one place so a
+    -- new endpoint is covered by default rather than by remembering.
+    require_mfa  BOOLEAN DEFAULT false,
     created_at   TIMESTAMP DEFAULT current_timestamp
 );
 
