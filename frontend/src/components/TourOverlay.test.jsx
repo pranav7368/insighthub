@@ -39,6 +39,27 @@ describe("TourOverlay", () => {
     expect(screen.getByText("That's the tour")).toBeInTheDocument();
   });
 
+  it("finds anchors rendered in the SAME commit as the tour", async () => {
+    // The other tests put anchors in the document before rendering, so they
+    // would all pass even if the step list were computed before commit. This
+    // is the case that distinguishes: the anchor and the overlay mount
+    // together, exactly as they would if the tour ever moved inside the
+    // component that owns its targets.
+    render(
+      <div>
+        <div data-tour="upload" />
+        <div data-tour="kpis" />
+        <TourOverlay steps={STEPS} onFinish={vi.fn()} />
+      </div>
+    );
+
+    expect(await screen.findByText("Welcome")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Bring your data")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByText("Your dashboard")).toBeInTheDocument();
+  });
+
   it("shows every step when all anchors exist", async () => {
     withAnchors("upload", "kpis");
     render(<TourOverlay steps={STEPS} onFinish={vi.fn()} />);

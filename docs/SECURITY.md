@@ -34,7 +34,7 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Backup & restore** | `scripts/backup.py` archives every table to Parquet with a manifest, verifies an archive without restoring it, and refuses an archive from a newer build. The **restore is tested on every CI run** — real data in, wiped, restored, same dashboard number out | `core/backup.py` |
 | **Accessibility** | WCAG 2.1 AA: zero axe-core violations across login, dashboard, tour and every admin dialog, in light and dark. Structural rules regression-tested in CI | `frontend/src/a11y.test.jsx` |
 
-Verified by **497 backend tests** and **75 frontend tests**, including a source-guard test that fails
+Verified by **497 backend tests** and **76 frontend tests**, including a source-guard test that fails
 if any module queries a dataset table without going through the row-level
 security rewrite.
 

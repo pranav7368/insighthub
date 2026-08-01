@@ -408,9 +408,16 @@ def _offline_nl_query(payload: dict) -> dict:
     else:
         chart = "kpi"
 
-    # words the question used that the dataset knows nothing about; the
-    # validator turns these into a refusal rather than a confident number
-    unresolved = [t for t in unresolved if t not in {str(v).lower() for v in filters.values()}]
+    # Words the question used that the dataset knows nothing about; the
+    # validator turns these into a refusal rather than a confident number.
+    # Compared case-INsensitively: `unresolved` holds capitalised proper nouns
+    # while filter values are lowercased here, so a case-sensitive test would
+    # fail to clear a value that WAS matched, and refuse an answerable
+    # question. Unreachable today — the vocabulary check above already drops
+    # anything matching a dimension value — but it is one word to make correct
+    # and the guarantee should not depend on that ordering holding.
+    filter_values = {str(v).lower() for v in filters.values()}
+    unresolved = [t for t in unresolved if t.lower() not in filter_values]
 
     return {"metric": metric, "aggregation": agg, "group_by": group_by,
             "filters": filters, "sort": sort, "limit": limit, "chart_type": chart,

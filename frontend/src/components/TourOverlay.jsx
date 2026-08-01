@@ -29,9 +29,20 @@ function placeCard(rect) {
  * while the tour is up.
  */
 export default function TourOverlay({ steps, onFinish }) {
-  const [visible] = useState(() => liveSteps(steps));
+  // Computed AFTER commit, not in a useState initialiser. liveSteps() reads
+  // the DOM, and a state initialiser runs before React has committed — so any
+  // anchor rendered in the same commit as this component would be invisible
+  // and its step dropped for the whole tour. Today the tour always mounts
+  // after the app is on screen, so this is prevention rather than a fix, but
+  // "steps silently disappear" is not a failure anyone would notice.
+  const [visible, setVisible] = useState([]);
   const [i, setI] = useState(0);
   const [rect, setRect] = useState(null);
+
+  useLayoutEffect(() => {
+    setVisible(liveSteps(steps));
+    setI(0);
+  }, [steps]);
 
   const step = visible[i];
   const last = i === visible.length - 1;

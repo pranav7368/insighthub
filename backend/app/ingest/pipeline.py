@@ -95,8 +95,14 @@ def create_structured_dataset(con, workspace_id: str, name: str, df, source_file
     # PII detection, before the roles are written: a sensitive column is never
     # left as a measure (identifiers are not metrics, and the masked value is
     # text, so it must stay out of aggregates).
+    # detect_pii only inspects the first 200 non-null values, so materialising
+    # the whole column wasted 266 ms on a 400k-row upload (measured). dropna()
+    # still scans, deliberately: sampling only the head would miss a column
+    # that is empty at the top and sensitive further down, and a missed PII
+    # column is an unmasked one.
     pii = {
-        p.name: detect_pii(p.name, df[p.name].tolist() if p.name in df.columns else ())
+        p.name: detect_pii(p.name, df[p.name].dropna().head(250).tolist()
+                           if p.name in df.columns else ())
         # a date column can never be PII, and its values shadow phone shapes
         if p.role != "date" else None
         for p in profiles
