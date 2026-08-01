@@ -31,7 +31,7 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Structured logging** | JSON, request-correlated, credential-redacted; identifiers logged, never row contents | `core/observability.py` |
 | **Schema migrations** | Versioned ledger so a released build never meets a database it cannot read | `core/migrations.py` |
 
-Verified by **426 backend tests** and **57 frontend tests**, including a source-guard test that fails
+Verified by **446 backend tests** and **57 frontend tests**, including a source-guard test that fails
 if any module queries a dataset table without going through the row-level
 security rewrite.
 
@@ -93,13 +93,24 @@ Be precise about this; a security reviewer will ask.
 
 ## 4. Retention
 
-The product does not currently expire anything automatically. Uploaded data,
-audit entries and archived rows persist until deleted. Under DPDP the retention
-period must be *stated* and honoured, so an operator must either document a
-policy and apply it, or implement scheduled deletion before making a retention
-claim.
+Configurable per workspace (`core/retention.py`), applied by the scheduler.
+Three independent periods: **audit entries**, **rollback archives**, and
+**uploaded datasets**.
 
-**Open item — do not claim a retention policy until this is built.**
+**Everything is off by default.** `0` means keep forever, and a workspace that
+has not configured a period is never touched — silent deletion because someone
+shipped a default would be unrecoverable. Each period has a floor (7 days, and
+30 for uploaded data) so a mistyped `1` cannot erase a year of history the same
+night, and `POST /api/privacy/retention/preview` reports exactly what a sweep
+would remove without removing anything, so the blast radius is visible before
+the policy is armed.
+
+A sweep records itself in the audit log *before* pruning it, so it cannot erase
+its own trace. Sweeps are idempotent and workspace-isolated.
+
+**What you may now state:** whatever periods you have actually configured.
+The mechanism exists; the *policy* is still an operator decision, and the
+number you publish must match the number set here.
 
 ---
 
@@ -131,7 +142,6 @@ undisclosed is worse than finding them listed:
 * **No SSO / SCIM.** No enterprise identity provider integration.
 * **MFA is not enforceable workspace-wide.** Members may enable it; an admin
   cannot yet require it for everyone, which some questionnaires ask for.
-* **No automated retention or scheduled deletion** (§4).
 * **No SOC 2 report.** Controls exist; an audit and observation window do not.
 * **Encryption at rest is deployment-dependent** (§2), not enforced by the app.
 * **Single-node storage.** No HA story for the DuckDB deployment mode.

@@ -50,7 +50,7 @@ from .members import (
 )
 from .billing import BillingError, QuotaError, check_quota, entitlements, set_plan
 from . import billing_stripe
-from .core import config, db, mfa, observability, passwords
+from .core import config, db, mfa, observability, passwords, retention
 from .core.datarights import (
     DataRightsError, as_download, erase_member, erase_workspace,
     export_member, export_workspace,
@@ -179,6 +179,11 @@ def _run_scheduled_work() -> None:
             pass
     try:
         run_due_alerts(con)  # each alert isolates its own errors
+    except Exception:
+        pass
+    try:
+        # only workspaces that configured a period are touched
+        retention.sweep_all(con)
     except Exception:
         pass
 
@@ -487,6 +492,62 @@ def erase_workspace_data(body: EraseWorkspaceBody, principal: Principal = Depend
         return erase_workspace(con, principal.workspace_id)
     except DataRightsError as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+class RetentionBody(BaseModel):
+    audit_days: int = 0
+    archive_days: int = 0
+    dataset_days: int = 0
+
+
+@app.get("/api/privacy/retention")
+def get_retention(principal: Principal = Depends(require_admin)):
+    """The workspace's retention periods. 0 means keep forever."""
+    policy = retention.get_policy(db.connect(), principal.workspace_id)
+    return {**policy.as_dict(),
+            "minimum_days": retention.MIN_DAYS,
+            "minimum_dataset_days": retention.MIN_DATASET_DAYS}
+
+
+@app.post("/api/privacy/retention/preview")
+def preview_retention(body: RetentionBody, principal: Principal = Depends(require_admin)):
+    """What a sweep WOULD delete under the proposed policy, deleting nothing.
+
+    Retention is the one feature that removes customer data with nobody
+    watching, so the blast radius has to be visible before it is armed.
+    """
+    con = db.connect()
+    try:
+        proposed = retention.validate_policy(body.audit_days, body.archive_days, body.dataset_days)
+    except retention.RetentionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    current = retention.get_policy(con, principal.workspace_id)
+    retention.set_policy(con, principal.workspace_id, proposed)
+    try:
+        return retention.preview(con, principal.workspace_id)
+    finally:
+        retention.set_policy(con, principal.workspace_id, current)   # never persist a preview
+
+
+@app.put("/api/privacy/retention")
+def set_retention(body: RetentionBody, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    try:
+        policy = retention.validate_policy(body.audit_days, body.archive_days, body.dataset_days)
+    except retention.RetentionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    saved = retention.set_policy(con, principal.workspace_id, policy)
+    db.audit(con, principal.workspace_id, principal.user_id, "retention_set",
+             f"audit={saved.audit_days} archive={saved.archive_days} datasets={saved.dataset_days}")
+    return saved.as_dict()
+
+
+@app.post("/api/privacy/retention/run")
+def run_retention(principal: Principal = Depends(require_admin)):
+    """Apply the saved policy now rather than waiting for the scheduler."""
+    return retention.sweep(db.connect(), principal.workspace_id,
+                           audit_actor=principal.user_id)
 
 
 @app.post("/api/auth/revoke-sessions")

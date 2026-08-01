@@ -119,6 +119,19 @@ MIGRATIONS: tuple[Migration, ...] = (
                )""",
         ),
     ),
+    Migration(
+        id="0007_retention_policies",
+        description="per-workspace retention periods (all off by default)",
+        statements=(
+            """CREATE TABLE IF NOT EXISTS retention_policies (
+                   workspace_id VARCHAR PRIMARY KEY,
+                   audit_days   INTEGER DEFAULT 0,
+                   archive_days INTEGER DEFAULT 0,
+                   dataset_days INTEGER DEFAULT 0,
+                   updated_at   TIMESTAMP DEFAULT current_timestamp
+               )""",
+        ),
+    ),
 )
 
 

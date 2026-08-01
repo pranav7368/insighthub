@@ -49,6 +49,17 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Single-use recovery codes, stored hashed like any other credential. The row
 -- is deleted on use, which is what makes them single-use.
+-- Retention. Nothing expires unless a workspace sets a period: 0 means keep
+-- forever, and an unconfigured workspace is never touched. See core/retention.py
+-- for why every default here is off.
+CREATE TABLE IF NOT EXISTS retention_policies (
+    workspace_id VARCHAR PRIMARY KEY,
+    audit_days   INTEGER DEFAULT 0,
+    archive_days INTEGER DEFAULT 0,
+    dataset_days INTEGER DEFAULT 0,
+    updated_at   TIMESTAMP DEFAULT current_timestamp
+);
+
 CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
     user_id      VARCHAR NOT NULL,
     workspace_id VARCHAR NOT NULL,
