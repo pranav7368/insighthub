@@ -12,16 +12,67 @@ PG_URL = os.environ.get("IH_TEST_DATABASE_URL",
                         "postgresql://insighthub:insighthub@localhost:5544/insighthub")
 
 
+def _postgres_reachable() -> str | None:
+    """Raw connectivity probe — no schema, no migrations.
+
+    Deliberately separate from the fixture below. The fixture used to wrap
+    db.connect() in `except Exception: skip`, which meant a MIGRATION failure
+    was reported as "Postgres not reachable" and silently skipped. That is
+    exactly how a broken Postgres deployment passed CI while every one of 497
+    tests was green: the only tests that touch Postgres skipped themselves.
+    Connectivity decides the skip; everything after it is allowed to fail.
+    """
+    import duckdb
+
+    try:
+        probe = duckdb.connect()
+        probe.execute("INSTALL postgres")
+        probe.execute("LOAD postgres")
+        probe.execute(f"ATTACH '{db._pg_conn_string(PG_URL)}' AS probe_pg (TYPE POSTGRES)")
+        probe.close()
+        return None
+    except Exception as exc:                      # noqa: BLE001
+        return str(exc)
+
+
 @pytest.fixture()
 def pg(monkeypatch):
+    unreachable = _postgres_reachable()
+    if unreachable:
+        pytest.skip(f"Postgres not reachable: {unreachable}")
+
     monkeypatch.setattr(config, "DATABASE_URL", PG_URL)
     monkeypatch.setattr(db, "_pg_schema_ready", False)
-    try:
-        con = db.connect()
-        con.execute("SELECT 1")
-    except Exception as exc:  # no Postgres here → skip, don't fail
-        pytest.skip(f"Postgres not reachable: {exc}")
+    # No try/except: schema or migration errors must FAIL, not skip.
+    con = db.connect()
+    con.execute("SELECT 1")
     return con
+
+
+def test_every_migration_applies_on_postgres(pg):
+    """The regression this file exists for.
+
+    `BOOLEAN DEFAULT false` in an ALTER TABLE is accepted by DuckDB's own
+    engine and rejected through its Postgres extension ("only constant DEFAULT
+    expressions are supported"). The file backend was therefore perfectly
+    healthy while the Postgres deployment could not start at all.
+    """
+    from app.core.migrations import MIGRATIONS, pending_ids
+
+    assert pending_ids(pg) == [], "every migration must apply cleanly on Postgres"
+
+    # and the columns those migrations add are really there
+    for table, column in [("users", "mfa_enabled"), ("users", "token_epoch"),
+                          ("workspaces", "require_mfa"), ("alerts", "created_by"),
+                          ("share_links", "created_by")]:
+        pg.execute(f"SELECT {column} FROM {table} LIMIT 1")     # raises if missing
+    assert len(MIGRATIONS) >= 8
+
+
+def test_readiness_probe_succeeds_on_postgres(pg):
+    """What /api/ready checks. It returned 503 for a fully-built stack because
+    db.connect() raised inside the migration step."""
+    assert pg.execute("SELECT 1").fetchone()[0] == 1
 
 
 def test_schema_and_params_on_postgres(pg):

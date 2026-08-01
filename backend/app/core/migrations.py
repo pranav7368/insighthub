@@ -50,6 +50,26 @@ def _add_column(table: str, column: str, type_sql: str) -> str:
     return f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {type_sql}"
 
 
+def _add_bool_column(table: str, column: str, default: bool) -> tuple[str, str]:
+    """Add a boolean column, then backfill it — never `DEFAULT false` inline.
+
+    DuckDB reaches Postgres through ATTACH, and its binder rejects a boolean
+    literal in ALTER TABLE ... DEFAULT: "only constant DEFAULT expressions are
+    supported". `INTEGER DEFAULT 0` is accepted, `BOOLEAN DEFAULT false` is
+    not. That failed every migration run against Postgres — the file backend
+    was fine, so the whole test suite passed while the deployment target the
+    deploy guide recommends could not start.
+
+    Adding the column bare and backfilling in a second statement works on
+    both. Reading code already COALESCEs these to false, so a NULL between the
+    two statements is harmless.
+    """
+    return (
+        f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} BOOLEAN",
+        f"UPDATE {table} SET {column} = {str(default).lower()} WHERE {column} IS NULL",
+    )
+
+
 # ---------------------------------------------------------------------------
 # The ledger. Append only. Ids are permanent.
 # ---------------------------------------------------------------------------
@@ -109,7 +129,7 @@ MIGRATIONS: tuple[Migration, ...] = (
         description="TOTP second factor + single-use recovery codes",
         statements=(
             _add_column("users", "mfa_secret", "VARCHAR"),
-            _add_column("users", "mfa_enabled", "BOOLEAN DEFAULT false"),
+            *_add_bool_column("users", "mfa_enabled", False),
             _add_column("users", "mfa_last_step", "BIGINT"),
             """CREATE TABLE IF NOT EXISTS mfa_recovery_codes (
                    user_id      VARCHAR NOT NULL,
@@ -135,7 +155,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         id="0008_workspace_require_mfa",
         description="admins can require a second factor for the whole workspace",
-        statements=(_add_column("workspaces", "require_mfa", "BOOLEAN DEFAULT false"),),
+        statements=_add_bool_column("workspaces", "require_mfa", False),
     ),
 )
 
