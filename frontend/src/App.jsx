@@ -5,6 +5,7 @@ import UploadButton from "./components/UploadButton";
 import ConnectSource from "./components/ConnectSource";
 import TemplateGallery from "./components/TemplateGallery";
 import AccessDialog from "./components/AccessDialog";
+import SecurityDialog from "./components/SecurityDialog";
 import ShareDialog from "./components/ShareDialog";
 import AlertsDialog from "./components/AlertsDialog";
 import MetricsDialog from "./components/MetricsDialog";
@@ -44,6 +45,7 @@ export default function App() {
   const [showConnect, setShowConnect] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
+  const [showSecurity, setShowSecurity] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
   const [showMetrics, setShowMetrics] = useState(false);
@@ -157,6 +159,8 @@ export default function App() {
             onClick={() => setTheme(theme === "dark" ? "light" : theme === "light" ? "auto" : "dark")}>
             {theme === "dark" ? "☾" : theme === "light" ? "☀" : "◐"}
           </button>
+          <button className="icon-btn" title="Account & security" aria-label="Account and security"
+            onClick={() => setShowSecurity(true)}>&#9737;</button>
           <button className="icon-btn" title="Replay the product tour" aria-label="Replay the product tour"
             onClick={() => setTourOn(true)}>?</button>
           <button className="ghost-btn" onClick={logout}>Log out</button>
@@ -260,6 +264,12 @@ export default function App() {
           datasetId={datasetId}
           datasetName={structuredDatasets.find((d) => d.dataset_id === datasetId)?.name || "dataset"}
           onClose={() => setShowAccess(false)}
+        />
+      )}
+      {showSecurity && (
+        <SecurityDialog
+          onClose={() => setShowSecurity(false)}
+          onSignedOut={logout}
         />
       )}
       {showTeam && <TeamDialog onClose={() => setShowTeam(false)} />}

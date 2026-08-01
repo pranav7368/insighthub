@@ -932,3 +932,28 @@ h1, h2, h3 { letter-spacing: -0.01em; }
   .access-table { display: block; overflow-x: auto; }
 }
 .auth-hint { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+
+/* ===== Account & security dialog ===== */
+.sec-inline { display: flex; gap: var(--sp-2); align-items: center; flex-wrap: wrap; margin-top: var(--sp-3); }
+.sec-inline input {
+  padding: 8px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border);
+  background: var(--surface-1); color: var(--text-primary); font: inherit; font-size: 13px;
+}
+.sec-secret {
+  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-4); margin-top: var(--sp-3);
+  background: var(--surface-2); border-radius: var(--radius);
+}
+.sec-secret__label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); }
+.sec-secret code { font-size: 15px; letter-spacing: 0.08em; font-weight: 600; word-break: break-all; }
+.sec-uri {
+  display: block; margin-top: var(--sp-2); padding: var(--sp-3);
+  background: var(--surface-2); border-radius: var(--radius-sm);
+  font-size: 11px; word-break: break-all; color: var(--text-secondary);
+}
+.sec-codes {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: var(--sp-2); list-style: none; padding: var(--sp-4); margin: var(--sp-3) 0;
+  background: var(--surface-2); border-radius: var(--radius);
+}
+.sec-codes code { font-size: 13px; letter-spacing: 0.04em; }

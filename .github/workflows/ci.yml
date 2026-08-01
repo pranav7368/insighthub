@@ -74,7 +74,7 @@ jobs:
         run: python -m pytest tests/eval -q -s
 
   frontend:
-    name: Frontend (lint + build)
+    name: Frontend (lint + test + build)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -89,6 +89,9 @@ jobs:
       - name: Lint
         working-directory: frontend
         run: npx oxlint src
+      - name: Test
+        working-directory: frontend
+        run: npm test
       - name: Build
         working-directory: frontend
         run: npx vite build

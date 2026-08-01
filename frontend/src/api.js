@@ -196,6 +196,32 @@ export const createMetric = (datasetId, body) =>
 export const deleteMetric = (metricId) =>
   client.delete(`/metrics/${metricId}`).then((r) => r.data);
 
+// --- Account security: two-factor, sessions, personal data ---
+export const getMfaStatus = () => client.get("/auth/mfa").then((r) => r.data);
+
+export const startMfaSetup = () => client.post("/auth/mfa/setup").then((r) => r.data);
+
+export const enableMfa = (code) =>
+  client.post("/auth/mfa/enable", { code }).then((r) => r.data);
+
+export const disableMfa = (password) =>
+  client.post("/auth/mfa/disable", { password }).then((r) => r.data);
+
+export const revokeSessions = () =>
+  client.post("/auth/revoke-sessions").then((r) => r.data);
+
+export const downloadMyData = () =>
+  client.get("/privacy/export/me", { responseType: "blob" }).then((r) => {
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "my-data.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
 // --- Row-level security (admin) ---
 export const listRlsRules = (datasetId) =>
   client.get(`/datasets/${datasetId}/rls`).then((r) => r.data);
