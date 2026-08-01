@@ -123,17 +123,20 @@ export default function AccessDialog({ datasetId, datasetName, onClose }) {
         </p>
 
         <form className="access-form" onSubmit={addRule}>
-          <select value={userId} onChange={(e) => setUserId(e.target.value)}>
+          <select value={userId} aria-label="Member to restrict"
+            onChange={(e) => setUserId(e.target.value)}>
             <option value="">Member…</option>
             {members.map((m) => (
               <option key={m.user_id} value={m.user_id}>{m.email} ({m.role})</option>
             ))}
           </select>
-          <select value={column} onChange={(e) => setColumn(e.target.value)}>
+          <select value={column} aria-label="Column to restrict on"
+            onChange={(e) => setColumn(e.target.value)}>
             <option value="">Column…</option>
             {dimensions.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
           </select>
-          <select value={operator} onChange={(e) => setOperator(e.target.value)}>
+          <select value={operator} aria-label="Match type"
+            onChange={(e) => setOperator(e.target.value)}>
             <option value="in">is one of</option>
             <option value="not_in">is not one of</option>
           </select>

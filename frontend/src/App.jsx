@@ -169,7 +169,8 @@ export default function App() {
 
       {(tab === "dashboard" || tab === "compare") && structuredDatasets.length > 0 && (
         <div className="toolbar">
-          <select className="dataset-select" value={datasetId ?? ""} onChange={(e) => setDatasetId(e.target.value)}>
+          <select className="dataset-select" aria-label="Choose dataset"
+            value={datasetId ?? ""} onChange={(e) => setDatasetId(e.target.value)}>
             {structuredDatasets.map((d) => (
               <option key={d.dataset_id} value={d.dataset_id}>{d.name} ({d.row_count} rows)</option>
             ))}

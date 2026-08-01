@@ -31,8 +31,9 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Security headers** | `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy` | `main.py` |
 | **Structured logging** | JSON, request-correlated, credential-redacted; identifiers logged, never row contents | `core/observability.py` |
 | **Schema migrations** | Versioned ledger so a released build never meets a database it cannot read | `core/migrations.py` |
+| **Accessibility** | WCAG 2.1 AA: zero axe-core violations across login, dashboard, tour and every admin dialog, in light and dark. Structural rules regression-tested in CI | `frontend/src/a11y.test.jsx` |
 
-Verified by **461 backend tests** and **69 frontend tests**, including a source-guard test that fails
+Verified by **461 backend tests** and **75 frontend tests**, including a source-guard test that fails
 if any module queries a dataset table without going through the row-level
 security rewrite.
 

@@ -8,7 +8,10 @@
   --page-plane: #f9f9f7;
   --text-primary: #0b0b0b;
   --text-secondary: #52514e;
-  --text-muted: #898781;
+  /* 4.98:1 on the light surface. The previous #898781 measured 3.5:1, under
+     the 4.5:1 AA threshold, which made every field label and hint fail. The
+     dark theme keeps #898781 because on #1a1a19 it already measures 4.85:1. */
+  --text-muted: #6f6e69;
   --gridline: #e1e0d9;
   --baseline: #c3c2b7;
   --border: rgba(11, 11, 11, 0.1);
@@ -19,6 +22,21 @@
   --status-critical: #d03b3b;
   --status-warning: #fab219;
   --status-good: #0ca30c;
+
+  /* Good/bad as TEXT. --status-good and --status-critical are tuned as chart
+     MARKS against the page; as text they measure 2.76:1 and 3.77:1 on a tinted
+     chip, and 4.32:1 / 3.27:1 on surface-2 — all under the 4.5:1 AA threshold.
+     These clear it everywhere they are used: 6.19 / 6.44 light, 8.66 / 7.15
+     dark. Marks keep --status-*; text uses these. */
+  --text-good: #006300;
+  --text-critical: #a52828;
+
+  /* Solid fills that carry WHITE text. --series-1 is the chart palette and
+     must not move; as a button background it gives 4.42:1 in light and 3.64:1
+     in dark, both under the 4.5:1 WCAG AA threshold for normal text. This one
+     measures 5.04:1 on white text and 3.46:1 against the dark surface, so it
+     clears AA for both text and UI-component contrast in either theme. */
+  --accent-fill: #2a6fc4;
 
   /* spacing / shape / motion (theme-independent) */
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 24px; --sp-8: 32px;
@@ -47,6 +65,8 @@
     --baseline: #383835;
     --border: rgba(255, 255, 255, 0.1);
     --success-text: #0ca30c;
+    --text-good: #5ee35e;
+    --text-critical: #f79393;
     --series-1: #3987e5;
     --series-2: #d95926;
     --series-3: #199e70;
@@ -68,6 +88,8 @@
   --baseline: #383835;
   --border: rgba(255, 255, 255, 0.1);
   --success-text: #0ca30c;
+  --text-good: #5ee35e;
+  --text-critical: #f79393;
   --series-1: #3987e5;
   --series-2: #d95926;
   --series-3: #199e70;

@@ -22,6 +22,7 @@ export default function ViewsBar({
     <div className="views-bar no-export">
       <select
         className="views-select"
+        aria-label="Saved view"
         value={activeViewId || ""}
         onChange={(e) => {
           const v = views.find((x) => x.view_id === e.target.value);
