@@ -33,7 +33,7 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Schema migrations** | Versioned ledger so a released build never meets a database it cannot read | `core/migrations.py` |
 | **Accessibility** | WCAG 2.1 AA: zero axe-core violations across login, dashboard, tour and every admin dialog, in light and dark. Structural rules regression-tested in CI | `frontend/src/a11y.test.jsx` |
 
-Verified by **461 backend tests** and **75 frontend tests**, including a source-guard test that fails
+Verified by **479 backend tests** and **75 frontend tests**, including a source-guard test that fails
 if any module queries a dataset table without going through the row-level
 security rewrite.
 
@@ -149,19 +149,23 @@ undisclosed is worse than finding them listed:
 
 ---
 
-## 7. Legal documents still required
+## 7. Legal documents
 
-None of these exist yet, and all are needed before a first paying customer:
+Drafts exist in [`docs/legal/`](legal/README.md): privacy policy, terms of
+service, DPA, subprocessor list, and an incident-response runbook. They are
+generated from one facts file (`docs/legal/company.json`) so a change updates
+every document at once, and they are written to match what the code actually
+does — the AI boundary, the real subprocessors, the retention mechanism.
 
-* privacy policy (what is collected, why, retention, subject rights)
-* terms of service
-* data processing agreement (DPA) — customer is controller, you are processor
-* subprocessor list (§3), with a change-notification commitment
-* incident response contacts (§5)
+**They have not been reviewed by a lawyer and must not be published until they
+are.** `python scripts/build_legal.py --check` fails while any placeholder
+remains, and that check runs in the test suite, so an unfinished draft cannot
+reach a website by accident.
 
-These need a lawyer familiar with DPDP and, if selling into the EU, GDPR. The
-technical facts they must describe are in this document; the legal drafting is
-not something to improvise from a template.
+What still needs a human: the registered entity details, a named grievance
+officer (required under the Indian IT Rules), the retention periods you will
+actually configure, and counsel's review of the liability cap, indemnities and
+transfer clauses.
 
 ---
 
