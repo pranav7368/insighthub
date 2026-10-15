@@ -34,7 +34,7 @@ const field = (label) => screen.getByLabelText(label);
 describe("RetentionPanel", () => {
   it("reads as keep-forever until something is set", async () => {
     render(<RetentionPanel />);
-    await waitFor(() => expect(api.getRetention).toHaveBeenCalled());
+    await screen.findByLabelText("Activity log");   // the form renders once the policy has loaded
 
     expect(field("Activity log")).toHaveValue(0);
     expect(screen.getAllByText("keep forever")).toHaveLength(3);
@@ -49,13 +49,13 @@ describe("RetentionPanel", () => {
 
   it("cannot preview while everything is off", async () => {
     render(<RetentionPanel />);
-    await waitFor(() => expect(api.getRetention).toHaveBeenCalled());
+    await screen.findByLabelText("Activity log");   // the form renders once the policy has loaded
     expect(screen.getByRole("button", { name: /preview what this deletes/i })).toBeDisabled();
   });
 
   it("shows what a policy would delete", async () => {
     render(<RetentionPanel />);
-    await waitFor(() => expect(api.getRetention).toHaveBeenCalled());
+    await screen.findByLabelText("Activity log");   // the form renders once the policy has loaded
 
     await userEvent.clear(field("Activity log"));
     await userEvent.type(field("Activity log"), "30");
@@ -68,7 +68,7 @@ describe("RetentionPanel", () => {
   /** The property that matters: looking must never arm. */
   it("does not save when previewing", async () => {
     render(<RetentionPanel />);
-    await waitFor(() => expect(api.getRetention).toHaveBeenCalled());
+    await screen.findByLabelText("Activity log");   // the form renders once the policy has loaded
 
     await userEvent.clear(field("Activity log"));
     await userEvent.type(field("Activity log"), "30");
@@ -81,7 +81,7 @@ describe("RetentionPanel", () => {
 
   it("discards a stale preview when the numbers change", async () => {
     render(<RetentionPanel />);
-    await waitFor(() => expect(api.getRetention).toHaveBeenCalled());
+    await screen.findByLabelText("Activity log");   // the form renders once the policy has loaded
 
     await userEvent.clear(field("Activity log"));
     await userEvent.type(field("Activity log"), "30");
@@ -96,7 +96,7 @@ describe("RetentionPanel", () => {
 
   it("saves the policy that is on screen", async () => {
     render(<RetentionPanel />);
-    await waitFor(() => expect(api.getRetention).toHaveBeenCalled());
+    await screen.findByLabelText("Activity log");   // the form renders once the policy has loaded
 
     await userEvent.clear(field("Uploaded data"));
     await userEvent.type(field("Uploaded data"), "365");
@@ -109,7 +109,7 @@ describe("RetentionPanel", () => {
 
   it("cannot save when nothing has changed", async () => {
     render(<RetentionPanel />);
-    await waitFor(() => expect(api.getRetention).toHaveBeenCalled());
+    await screen.findByLabelText("Activity log");   // the form renders once the policy has loaded
     expect(screen.getByRole("button", { name: /save policy/i })).toBeDisabled();
   });
 
@@ -118,7 +118,7 @@ describe("RetentionPanel", () => {
       response: { data: { detail: "audit retention must be at least 7 days" } },
     });
     render(<RetentionPanel />);
-    await waitFor(() => expect(api.getRetention).toHaveBeenCalled());
+    await screen.findByLabelText("Activity log");   // the form renders once the policy has loaded
 
     await userEvent.clear(field("Activity log"));
     await userEvent.type(field("Activity log"), "1");
