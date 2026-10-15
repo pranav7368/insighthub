@@ -14,7 +14,7 @@ function ChartTooltip({ active, payload, subtype }) {
   );
 }
 
-export default function BreakdownChart({ dimensionName, breakdown, measure, subtype, onSelect, activeValue }) {
+export default function BreakdownChart({ dimensionName, breakdown, measure, subtype, onSelect, onShowAll, activeValue }) {
   const data = breakdown?.data ?? [];
   if (!data.length) return <div className="empty-panel">No data for {humanLabel(dimensionName)}.</div>;
 
@@ -25,7 +25,7 @@ export default function BreakdownChart({ dimensionName, breakdown, measure, subt
     <div className="chart-card">
       <div className="chart-card__title">
         {humanLabel(measure)} by {humanLabel(dimensionName)}
-        <span className="chart-card__tag">click a bar to filter</span>
+        <span className="chart-card__tag">click a bar for details</span>
       </div>
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
@@ -41,6 +41,12 @@ export default function BreakdownChart({ dimensionName, breakdown, measure, subt
           </Bar>
         </BarChart>
       </ResponsiveContainer>
+      {breakdown.others && (
+        <button className="chart-card__more no-export" onClick={() => onShowAll && onShowAll(dimensionName)}>
+          + {breakdown.others.count} more {humanLabel(dimensionName).toLowerCase()} values
+          ({formatNumber(breakdown.others.value, subtype)}, {breakdown.others.share_pct}%) — see all ›
+        </button>
+      )}
     </div>
   );
 }

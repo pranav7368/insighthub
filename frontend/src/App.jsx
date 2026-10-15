@@ -20,6 +20,7 @@ import ComparePane from "./components/ComparePane";
 import AskView from "./components/AskView";
 import TourOverlay from "./components/TourOverlay";
 import { TOUR_KEY, TOUR_STEPS } from "./tour";
+import { readUrlState } from "./drill";
 
 function useTheme() {
   const [theme, setTheme] = useState(() => localStorage.getItem("ih_theme") || "auto");
@@ -79,10 +80,31 @@ export default function App() {
   useEffect(() => {
     if (!authed) return;
     refresh().then((list) => {
-      const structured = list.find((d) => d.kind === "structured");
+      // a shared / bookmarked link names its dataset; otherwise take the first
+      const wanted = readUrlState(window.location.search).datasetId;
+      const structured = list.find((d) => d.kind === "structured" && d.dataset_id === wanted)
+        || list.find((d) => d.kind === "structured");
       if (structured) setDatasetId(structured.dataset_id);
     });
   }, [authed, refresh]);
+
+  // back / forward across a dataset switch
+  useEffect(() => {
+    const onPop = () => {
+      const id = readUrlState(window.location.search).datasetId;
+      if (id && id !== datasetId && datasets.some((d) => d.dataset_id === id)) {
+        setDatasetId(id);
+        setTab("dashboard");
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [datasetId, datasets]);
+
+  const chooseDataset = (id) => {
+    window.history.pushState(null, "", `${window.location.pathname}?ds=${encodeURIComponent(id)}`);
+    setDatasetId(id);
+  };
 
   const handleUpload = async (file) => {
     const result = await uploadDataset(file);
@@ -170,7 +192,7 @@ export default function App() {
       {(tab === "dashboard" || tab === "compare") && structuredDatasets.length > 0 && (
         <div className="toolbar">
           <select className="dataset-select" aria-label="Choose dataset"
-            value={datasetId ?? ""} onChange={(e) => setDatasetId(e.target.value)}>
+            value={datasetId ?? ""} onChange={(e) => chooseDataset(e.target.value)}>
             {structuredDatasets.map((d) => (
               <option key={d.dataset_id} value={d.dataset_id}>{d.name} ({d.row_count} rows)</option>
             ))}

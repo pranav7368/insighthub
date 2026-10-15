@@ -1,6 +1,6 @@
 const ICON = { good: "✓", warning: "!", critical: "✕", info: "i" };
 
-export default function InsightsPanel({ insights }) {
+export default function InsightsPanel({ insights, onInvestigate }) {
   if (!insights?.length) return null;
   return (
     <div className="insights">
@@ -14,6 +14,11 @@ export default function InsightsPanel({ insights }) {
             <div className="insight__body">
               <div className="insight__title">{it.title}</div>
               <div className="insight__detail">{it.detail}</div>
+              {it.drill && onInvestigate && (
+                <button className="link-btn insight__go no-export" onClick={() => onInvestigate(it.drill)}>
+                  Investigate ›
+                </button>
+              )}
             </div>
           </div>
         ))}

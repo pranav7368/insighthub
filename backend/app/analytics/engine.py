@@ -227,11 +227,22 @@ def compute_dashboard(
                 GROUP BY 1 ORDER BY value DESC NULLS LAST LIMIT 20
             """
             rows = con.execute(sql, dparams).fetchall()
-            total = sum((r[1] or 0) for r in rows) or 1
+            # shares are of the WHOLE, not of the top 20 shown — otherwise a
+            # long tail silently inflates every share on the chart
+            grand, distinct = con.execute(
+                f"SELECT SUM({mcol}), COUNT(DISTINCT {dcol}) FROM {table} {dwhere}", dparams
+            ).fetchone()
+            total = grand or sum((r[1] or 0) for r in rows) or 1
+            others = None
+            if distinct > len(rows):
+                rest = (grand or 0) - sum((r[1] or 0) for r in rows)
+                others = {"count": distinct - len(rows), "value": rest,
+                          "share_pct": round(rest / total * 100, 1)}
             breakdowns[dim.name] = {
                 "subtype": dim.subtype, "measure": chosen,
                 "data": [{"name": r[0], "value": r[1],
                           "share_pct": round((r[1] or 0) / total * 100, 1)} for r in rows],
+                "others": others,
             }
 
     # ---- Distributions: five-number summary per measure ----

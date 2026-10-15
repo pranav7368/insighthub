@@ -35,6 +35,10 @@ from .analytics.semantic import (
     MetricError, create_metric, delete_metric, list_metrics,
 )
 from .analytics.drivers import DriverError, explain_change
+from .analytics.drill import (
+    DrillError, breakdown as drill_breakdown, inspect as drill_inspect, parse_filters,
+    records as drill_records, records_csv as drill_records_csv,
+)
 from .analytics.rls import (
     RuleError, RuleNotFound, create_rule, delete_rule, list_rules, secured_relation,
 )
@@ -1290,6 +1294,77 @@ def explain(dataset_id: str, request: Request, principal: Principal = Depends(ge
         raise HTTPException(status_code=404, detail="dataset not found")
     except DriverError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+# ------------------------------------------------------ drill-down -------
+# A "slice" is measure + aggregation + filters (one JSON object) + date range.
+# Every number on the dashboard can be opened as a slice and taken apart.
+
+def _drill(fn, dataset_id: str, principal: Principal, **kwargs):
+    con = db.connect()
+    try:
+        return fn(con, principal.workspace_id, dataset_id, user_id=principal.user_id, **kwargs)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except (DrillError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/datasets/{dataset_id}/inspect")
+def inspect_slice(dataset_id: str, measure: str | None = None, agg: str = "sum",
+                  filters: str | None = None, date_from: str | None = None,
+                  date_to: str | None = None, grain: str = "month",
+                  principal: Principal = Depends(get_principal)):
+    """One number, fully explained: value, formula, SQL, spread, trend at any
+    grain, previous-period and year-ago comparison, top contributors."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(drill_inspect, dataset_id, principal, measure=measure, agg=agg, filters=parsed,
+                  date_from=date_from, date_to=date_to, grain=grain)
+
+
+@app.get("/api/datasets/{dataset_id}/breakdown")
+def breakdown_slice(dataset_id: str, dimension: str, measure: str | None = None,
+                    agg: str = "sum", filters: str | None = None,
+                    date_from: str | None = None, date_to: str | None = None, limit: int = 50,
+                    principal: Principal = Depends(get_principal)):
+    """A slice split by one dimension, fully ranked, with the tail as 'other'."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(drill_breakdown, dataset_id, principal, dimension=dimension, measure=measure,
+                  agg=agg, filters=parsed, date_from=date_from, date_to=date_to, limit=limit)
+
+
+@app.get("/api/datasets/{dataset_id}/rows")
+def slice_rows(dataset_id: str, filters: str | None = None, date_from: str | None = None,
+               date_to: str | None = None, sort: str | None = None, desc: bool = True,
+               page: int = 1, page_size: int = 50,
+               principal: Principal = Depends(get_principal)):
+    """The actual records behind a slice, paged and sortable."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(drill_records, dataset_id, principal, filters=parsed, date_from=date_from,
+                  date_to=date_to, sort=sort, desc=desc, page=page, page_size=page_size)
+
+
+@app.get("/api/datasets/{dataset_id}/rows.csv")
+def slice_rows_csv(dataset_id: str, filters: str | None = None, date_from: str | None = None,
+                   date_to: str | None = None, sort: str | None = None, desc: bool = True,
+                   principal: Principal = Depends(get_principal)):
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    csv_text = _drill(drill_records_csv, dataset_id, principal, filters=parsed,
+                      date_from=date_from, date_to=date_to, sort=sort, desc=desc)
+    return Response(content=csv_text, media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="rows.csv"'})
 
 
 # --------------------------------------------- certified metrics ---------

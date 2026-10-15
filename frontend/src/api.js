@@ -97,6 +97,46 @@ export const getNarrative = (datasetId) =>
 export const getExplain = (datasetId, measure) =>
   client.get(`/datasets/${datasetId}/explain`, { params: measure ? { measure } : {} }).then((r) => r.data);
 
+// --- Drill-down: a slice is {measure, agg, filters, date_from, date_to} ---
+// Filters travel as one JSON object so a column named "page" or "sort" can't
+// collide with the endpoint's own parameters.
+const sliceParams = (s) => {
+  const p = {};
+  if (s.filters && Object.keys(s.filters).length) p.filters = JSON.stringify(s.filters);
+  if (s.date_from) p.date_from = s.date_from;
+  if (s.date_to) p.date_to = s.date_to;
+  return p;
+};
+
+export const getInspect = (datasetId, s) =>
+  client.get(`/datasets/${datasetId}/inspect`, {
+    params: { ...sliceParams(s), measure: s.measure || undefined, agg: s.agg || "sum", grain: s.grain || "month" },
+  }).then((r) => r.data);
+
+export const getBreakdown = (datasetId, s, dimension, limit = 50) =>
+  client.get(`/datasets/${datasetId}/breakdown`, {
+    params: { ...sliceParams(s), dimension, limit, measure: s.measure || undefined, agg: s.agg || "sum" },
+  }).then((r) => r.data);
+
+export const getRows = (datasetId, s, { sort, desc = true, page = 1, pageSize = 50 } = {}) =>
+  client.get(`/datasets/${datasetId}/rows`, {
+    params: { ...sliceParams(s), sort: sort || undefined, desc, page, page_size: pageSize },
+  }).then((r) => r.data);
+
+export const exportRowsCsv = (datasetId, s, { sort, desc = true } = {}, name = "rows") =>
+  client.get(`/datasets/${datasetId}/rows.csv`, {
+    params: { ...sliceParams(s), sort: sort || undefined, desc }, responseType: "blob",
+  }).then((r) => {
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
+
 // --- Multi-table joins ---
 export const suggestJoin = (left, right) =>
   client.get("/joins/suggest", { params: { left, right } }).then((r) => r.data);

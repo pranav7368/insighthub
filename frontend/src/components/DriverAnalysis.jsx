@@ -1,24 +1,25 @@
 import { useState } from "react";
 import { formatNumber, humanLabel } from "../format";
 
-function DriverBar({ d, max, subtype }) {
+function DriverBar({ d, max, subtype, onClick }) {
   const pos = d.delta >= 0;
   const width = max > 0 ? Math.max(2, (Math.abs(d.delta) / max) * 100) : 0;
   return (
-    <div className="driver-row">
-      <div className="driver-row__name">{d.name}</div>
-      <div className="driver-row__track">
-        <div className={`driver-row__bar driver-row__bar--${pos ? "up" : "down"}`} style={{ width: `${width}%` }} />
-      </div>
-      <div className={`driver-row__delta driver-row__delta--${pos ? "up" : "down"}`}>
+    <button className="driver-row driver-row--btn" onClick={onClick}
+      title={`Open ${d.name} in the latest month`}>
+      <span className="driver-row__name">{d.name}</span>
+      <span className="driver-row__track">
+        <span className={`driver-row__bar driver-row__bar--${pos ? "up" : "down"}`} style={{ width: `${width}%` }} />
+      </span>
+      <span className={`driver-row__delta driver-row__delta--${pos ? "up" : "down"}`}>
         {pos ? "+" : "−"}{formatNumber(Math.abs(d.delta), subtype)}
         {d.share != null && <span className="driver-row__share">{Math.round(Math.abs(d.share) * 100)}%</span>}
-      </div>
-    </div>
+      </span>
+    </button>
   );
 }
 
-export default function DriverAnalysis({ explain }) {
+export default function DriverAnalysis({ explain, onSelect }) {
   const dims = explain?.dimensions ? Object.keys(explain.dimensions) : [];
   const [dim, setDim] = useState(explain?.primary_dimension || dims[0] || null);
 
@@ -47,7 +48,10 @@ export default function DriverAnalysis({ explain }) {
       </div>
 
       <div className="driver-bars">
-        {drivers.map((d) => <DriverBar key={d.name} d={d} max={max} subtype={explain.subtype} />)}
+        {drivers.map((d) => (
+          <DriverBar key={d.name} d={d} max={max} subtype={explain.subtype}
+            onClick={() => onSelect && onSelect(active, d.name, explain)} />
+        ))}
       </div>
     </div>
   );

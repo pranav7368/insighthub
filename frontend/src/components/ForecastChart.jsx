@@ -18,7 +18,7 @@ function ChartTooltip({ active, payload, label, subtype }) {
   );
 }
 
-export default function ForecastChart({ measure, subtype, forecast, anomalies }) {
+export default function ForecastChart({ measure, subtype, forecast, anomalies, onPeriod }) {
   if (!forecast?.history?.length) {
     return <div className="empty-panel">No time series for this measure (a date column is required).</div>;
   }
@@ -41,9 +41,16 @@ export default function ForecastChart({ measure, subtype, forecast, anomalies })
       <div className="chart-card__title">
         {humanLabel(measure)} — trend & forecast
         {proj.length > 0 && <span className="chart-card__tag">next {proj.length}mo · {forecast.method.replace("+", " + ")}</span>}
+        {onPeriod && <span className="chart-card__tag">click a month for details</span>}
       </div>
       <ResponsiveContainer width="100%" height={300}>
-        <ComposedChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+        <ComposedChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
+          style={onPeriod ? { cursor: "pointer" } : undefined}
+          onClick={(s) => {
+            // only real months drill — a projected point has no rows behind it
+            const row = data[Number(s?.activeIndex ?? s?.activeTooltipIndex)];
+            if (onPeriod && row && row.actual != null) onPeriod(row.period);
+          }}>
           <CartesianGrid stroke="var(--gridline)" vertical={false} />
           <XAxis dataKey="period" stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} minTickGap={20} />
           <YAxis stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} axisLine={false}

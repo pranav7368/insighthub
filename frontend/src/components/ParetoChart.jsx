@@ -17,7 +17,7 @@ function Tip({ active, payload, label }) {
   );
 }
 
-export default function ParetoChart({ pareto }) {
+export default function ParetoChart({ pareto, onSelect }) {
   if (!pareto?.items?.length) return null;
   const data = pareto.items;
   return (
@@ -36,7 +36,8 @@ export default function ParetoChart({ pareto }) {
           <Tooltip content={<Tip />} cursor={{ fill: "var(--gridline)" }} />
           <ReferenceLine y={80} stroke="var(--text-muted)" strokeDasharray="4 4"
             label={{ value: "80%", fill: "var(--text-muted)", fontSize: 10, position: "right" }} />
-          <Bar dataKey="share_pct" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={44} />
+          <Bar dataKey="share_pct" fill="var(--series-1)" radius={[4, 4, 0, 0]} maxBarSize={44} cursor="pointer"
+            onClick={(bar) => onSelect && onSelect(pareto.dimension, bar?.payload?.name ?? bar?.name)} />
           <Line dataKey="cumulative_pct" stroke="var(--series-2)" strokeWidth={2} dot={{ r: 2 }} isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>

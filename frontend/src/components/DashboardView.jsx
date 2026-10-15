@@ -22,8 +22,10 @@ import CertifiedMetrics from "./CertifiedMetrics";
 import DriverAnalysis from "./DriverAnalysis";
 import ViewsBar from "./ViewsBar";
 import DashSection from "./DashSection";
+import Inspector from "./Inspector";
 import { mappableFraction } from "../geo";
 import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections";
+import { buildUrlSearch, makeCtx, readUrlState } from "../drill";
 
 // stable JSON for comparing a live config against a saved one (dirty check).
 // hidden_sections is a set (sorted), section_order is a sequence (kept as-is).
@@ -37,12 +39,28 @@ const canonConfig = (c) =>
     section_order: [...(c.section_order || [])],
   });
 
+// A URL that names this dataset owns the initial state (a shared or
+// bookmarked drill); otherwise the saved default view does.
+function initialFromUrl(datasetId) {
+  const s = readUrlState(window.location.search);
+  if (s.datasetId !== datasetId) return null;
+  const owns = s.measure || s.inspect || s.dateFrom || s.dateTo || Object.keys(s.filters).length;
+  return owns ? s : null;
+}
+
 export default function DashboardView({ datasetId }) {
+  const [fromUrl] = useState(() => initialFromUrl(datasetId));
   const [dashboard, setDashboard] = useState(null);
-  const [activeMeasure, setActiveMeasure] = useState(null);
-  const [filters, setFilters] = useState({});
-  const [dateFrom, setDateFrom] = useState();
-  const [dateTo, setDateTo] = useState();
+  const [activeMeasure, setActiveMeasure] = useState(fromUrl?.measure || null);
+  const [filters, setFilters] = useState(fromUrl?.filters || {});
+  const [dateFrom, setDateFrom] = useState(fromUrl?.dateFrom);
+  const [dateTo, setDateTo] = useState(fromUrl?.dateTo);
+  const [inspectCtx, setInspectCtx] = useState(fromUrl?.inspect || null);
+  // how the next state change reaches the URL: "push" adds a history entry
+  // (a drill step the back button can undo), "replace" edits in place, and
+  // "skip" means the change came FROM the URL (back / forward)
+  const navMode = useRef("replace");
+  const returnFocus = useRef(null);
   const [error, setError] = useState(null);
   const [pair, setPair] = useState(null);            // user-chosen scatter pair
   const [customScatter, setCustomScatter] = useState(null);
@@ -131,17 +149,44 @@ export default function DashboardView({ datasetId }) {
     }
   };
 
+  // The component is keyed by dataset, so this runs once per dataset.
   useEffect(() => {
-    setActiveMeasure(null); setFilters({}); setDateFrom(undefined); setDateTo(undefined); setPair(null);
-    setHiddenSections([]); setSectionOrder([]); setArranging(false); setActiveViewId(null);
     listViews(datasetId)
       .then((vs) => {
         setViews(vs);
         const def = vs.find((v) => v.is_default);
-        if (def) applyView(def);   // auto-apply the saved default view
+        if (def && !fromUrl) applyView(def);   // auto-apply the saved default view
       })
       .catch(() => setViews([]));
     listMetrics(datasetId).then(setMetrics).catch(() => setMetrics([]));
+  }, [datasetId]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // state -> URL
+  useEffect(() => {
+    const mode = navMode.current;
+    navMode.current = "replace";
+    if (mode === "skip") return;
+    const search = buildUrlSearch({ datasetId, measure: activeMeasure, dateFrom, dateTo, filters, inspect: inspectCtx });
+    if (search === window.location.search) return;
+    const url = window.location.pathname + search + window.location.hash;
+    if (mode === "push") window.history.pushState(null, "", url);
+    else window.history.replaceState(null, "", url);
+  }, [datasetId, activeMeasure, dateFrom, dateTo, filters, inspectCtx]);
+
+  // URL -> state (back / forward)
+  useEffect(() => {
+    const onPop = () => {
+      const s = readUrlState(window.location.search);
+      if (s.datasetId && s.datasetId !== datasetId) return;   // App switches the dataset
+      navMode.current = "skip";
+      setFilters(s.filters);
+      setDateFrom(s.dateFrom);
+      setDateTo(s.dateTo);
+      if (s.measure) setActiveMeasure(s.measure);
+      setInspectCtx(s.inspect);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, [datasetId]);
 
   // Esc leaves arrange mode — the usual way out of a transient editing mode
@@ -185,16 +230,6 @@ export default function DashboardView({ datasetId }) {
       .catch(() => setExplainData(null));
   }, [datasetId, activeMeasure]);
 
-  // click a bar/slice -> toggle that dimension=value filter -> whole dashboard recomputes
-  const toggleFilter = (dim, value) => {
-    if (value == null) return;
-    setFilters((prev) => {
-      const next = { ...prev };
-      if (next[dim] === value) delete next[dim];
-      else next[dim] = value;
-      return next;
-    });
-  };
   const removeFilter = (dim) =>
     setFilters((prev) => {
       const next = { ...prev };
@@ -216,6 +251,45 @@ export default function DashboardView({ datasetId }) {
 
   const activeFilterCount = Object.keys(filters).length + (dateFrom ? 1 : 0);
 
+  // ---- drill-down: every number opens in the inspector ----
+  // The slice starts from what the dashboard shows (its filters, dates and
+  // measure); `partial` says which part of it was clicked.
+  const openInspect = (partial = {}) => {
+    if (!inspectCtx) returnFocus.current = document.activeElement;
+    navMode.current = "push";
+    setInspectCtx(makeCtx({ measure, filters, date_from: dateFrom || null, date_to: dateTo || null, ...partial }));
+  };
+  const inspectValue = (dim, value) => {
+    if (value == null) return;
+    openInspect({ filters: { ...filters, [dim]: String(value) } });
+  };
+  const inspectAll = (dim) => openInspect({ tab: "breakdown", dimension: dim });
+  const navigateInspect = (next, { replace } = {}) => {
+    navMode.current = replace ? "replace" : "push";
+    setInspectCtx(next);
+  };
+  const closeInspect = () => {
+    navMode.current = "push";
+    setInspectCtx(null);
+    const el = returnFocus.current;
+    if (el && document.contains(el)) setTimeout(() => el.focus(), 0);
+  };
+  // "show this on the dashboard": the drilled slice becomes the dashboard's own
+  const applyInspect = (c) => {
+    navMode.current = "push";
+    setFilters({ ...c.filters });
+    setDateFrom(c.date_from || undefined);
+    setDateTo(c.date_to || undefined);
+    if (c.measure) setActiveMeasure(c.measure);
+    setInspectCtx(null);
+  };
+  const investigate = (drill) => openInspect({
+    measure: drill.measure || measure,
+    filters: { ...filters, ...(drill.filters || {}) },
+    ...(drill.period ? { date_from: drill.period, date_to: drill.period } : {}),
+    ...(drill.dimension ? { tab: "breakdown", dimension: drill.dimension } : {}),
+  });
+
   // Every section, in its natural order. A null node means "this dataset has
   // nothing to show here" — those drop out entirely so arrange mode never
   // offers an empty tile to drag.
@@ -230,15 +304,23 @@ export default function DashboardView({ datasetId }) {
         <div className="kpi-row">
           {dashboard.kpis.map((kpi) => (
             <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
-              onSelect={() => setActiveMeasure(kpi.column)} />
+              onSelect={() => { setActiveMeasure(kpi.column); openInspect({ measure: kpi.column }); }} />
           ))}
         </div>
       ),
     },
     { key: "metrics", node: metrics.length > 0 && <CertifiedMetrics metrics={metrics} /> },
-    { key: "drivers", node: <DriverAnalysis explain={explainData} /> },
+    {
+      key: "drivers",
+      // "what changed" compares the whole dataset's latest two months, so its
+      // drill is that month alone — not the dashboard's filters
+      node: <DriverAnalysis explain={explainData} onSelect={(dim, name, ex) => openInspect({
+        measure: ex.measure, filters: { [dim]: String(name) },
+        date_from: ex.current_period, date_to: ex.current_period,
+      })} />,
+    },
     { key: "growth", node: <GrowthStrip growth={dashboard.growth} measure={measure} /> },
-    { key: "insights", node: <InsightsPanel insights={dashboard.insights} /> },
+    { key: "insights", node: <InsightsPanel insights={dashboard.insights} onInvestigate={investigate} /> },
     { key: "narrative", node: <AiNarrative datasetId={datasetId} /> },
     {
       key: "forecast",
@@ -247,6 +329,7 @@ export default function DashboardView({ datasetId }) {
           measure={measure} subtype={subtypeOf(measure)}
           forecast={dashboard.forecasts?.[measure]}
           anomalies={dashboard.anomalies?.[measure]}
+          onPeriod={(period) => openInspect({ date_from: period, date_to: period })}
         />
       ),
     },
@@ -257,11 +340,11 @@ export default function DashboardView({ datasetId }) {
           {Object.entries(dashboard.breakdowns).map(([dim, bd]) => (
             <BreakdownChart key={dim} dimensionName={dim} breakdown={bd}
               measure={measure} subtype={subtypeOf(measure)}
-              onSelect={toggleFilter} activeValue={filters[dim]} />
+              onSelect={inspectValue} onShowAll={inspectAll} activeValue={filters[dim]} />
           ))}
           {Object.entries(dashboard.breakdowns).slice(0, 1).map(([dim, bd]) => (
             <ContributionDonut key={`donut-${dim}`} dimensionName={dim} breakdown={bd}
-              subtype={subtypeOf(measure)} onSelect={toggleFilter} activeValue={filters[dim]} />
+              subtype={subtypeOf(measure)} onSelect={inspectValue} onShowAll={inspectAll} activeValue={filters[dim]} />
           ))}
         </div>
       ),
@@ -276,7 +359,7 @@ export default function DashboardView({ datasetId }) {
     {
       key: "pareto",
       node: dashboard.pareto && dashboard.pareto.total_categories > 2 && (
-        <ParetoChart pareto={dashboard.pareto} />
+        <ParetoChart pareto={dashboard.pareto} onSelect={inspectValue} />
       ),
     },
     {
@@ -320,7 +403,7 @@ export default function DashboardView({ datasetId }) {
   const visibleKeys = visible.map((s) => s.key);
 
   return (
-    <div className="dash-layout">
+    <div className={`dash-layout${inspectCtx ? " has-inspector" : ""}`}>
       <div className={`filter-panel${filtersOpen ? " filter-panel--open" : ""}`}>
         <FilterBar
           filterOptions={dashboard.filter_options}
@@ -396,6 +479,11 @@ export default function DashboardView({ datasetId }) {
           </DashSection>
         ))}
       </div>
+
+      {inspectCtx && (
+        <Inspector datasetId={datasetId} ctx={inspectCtx}
+          onNavigate={navigateInspect} onClose={closeInspect} onApply={applyInspect} />
+      )}
     </div>
   );
 }
