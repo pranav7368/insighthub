@@ -1,11 +1,10 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
-import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getExplain, getScatter, getTargets, listMetrics, listViews, updateView } from "../api";
+import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getActions, getExplain, getScatter, getTargets, listMetrics, listViews, updateView } from "../api";
 import { exportPdf, exportPng } from "../export";
 import KpiCard from "./KpiCard";
 import CorrelationHeatmap from "./CorrelationHeatmap";
 import ScatterPlot from "./ScatterChart";
 import TreemapChart from "./TreemapChart";
-import GrowthStrip from "./GrowthStrip";
 import ParetoChart from "./ParetoChart";
 import AiNarrative from "./AiNarrative";
 import InsightsPanel from "./InsightsPanel";
@@ -24,6 +23,7 @@ import ViewsBar from "./ViewsBar";
 import DashSection from "./DashSection";
 import DecompositionTree from "./DecompositionTree";
 import ActionsPanel from "./ActionsPanel";
+import SummaryCard from "./SummaryCard";
 import Icon from "./Icon";
 import Popover from "./Popover";
 import DataMenu from "./DataMenu";
@@ -189,6 +189,18 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
     getTargets(datasetId).then(setTargets).catch(() => setTargets([]));
   }, [datasetId, targetsVersion]);
   const targetsChanged = () => setTargetsVersion((v) => v + 1);
+
+  // recommended actions, fetched once: the summary card and the full list share them
+  const [actionsData, setActionsData] = useState(null);
+  const filtersKey = JSON.stringify(filters);
+  useEffect(() => {
+    if (!activeMeasure) return undefined;
+    let live = true;
+    getActions(datasetId, { measure: activeMeasure, filters })
+      .then((d) => { if (live) setActionsData(d); })
+      .catch(() => { if (live) setActionsData({ actions: [] }); });
+    return () => { live = false; };
+  }, [datasetId, activeMeasure, filtersKey, targetsVersion]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // state -> URL
   useEffect(() => {
@@ -376,6 +388,21 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
   const segmentMenu = (e, dim, value) =>
     sliceMenu(e, { filters: { ...filters, [dim]: String(value) } }, `${humanLabel(dim)}: ${value}`);
 
+  // A certified metric that is exactly a KPI's total ("Revenue = SUM(revenue)")
+  // badges that KPI card instead of repeating the same number in its own card.
+  const certifiedFor = {};
+  for (const m of metrics) {
+    const d = m.definition || {};
+    if (m.kind === "aggregate" && d.agg === "sum" && d.column && !certifiedFor[d.column]) certifiedFor[d.column] = m.name;
+  }
+  const kpiColumns = new Set(dashboard.kpis.map((k) => k.column));
+  const otherMetrics = metrics.filter((m) => !(m.kind === "aggregate" && m.definition?.agg === "sum"
+    && kpiColumns.has(m.definition?.column) && certifiedFor[m.definition.column] === m.name));
+  const seeAllActions = () => {
+    if (hiddenSections.includes("actions")) toggleSection("actions");
+    setTimeout(() => document.getElementById("recommended-actions")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+
   // Every section, in its natural order. A null node means "this dataset has
   // nothing to show here" — those drop out entirely so arrange mode never
   // offers an empty tile to drag.
@@ -390,6 +417,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
         <div className="kpi-row">
           {dashboard.kpis.map((kpi) => (
             <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
+              growth={dashboard.growth?.[kpi.column]} certified={certifiedFor[kpi.column]}
               target={targetFor(targets, { measure: kpi.column, filters, date_from: dateFrom, date_to: dateTo })}
               onSelect={() => { setActiveMeasure(kpi.column); openInspect({ measure: kpi.column }); }}
               onContext={(e) => sliceMenu(e, { measure: kpi.column }, humanLabel(kpi.column))} />
@@ -400,11 +428,15 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
     {
       key: "actions",
       node: measure && (
-        <ActionsPanel datasetId={datasetId} measure={measure} filters={filters}
+        <ActionsPanel datasetId={datasetId} measure={measure} filters={filters} data={actionsData}
           refreshKey={targetsVersion} onOpen={(evidence) => openInspect(evidence)} />
       ),
     },
-    { key: "metrics", node: metrics.length > 0 && <CertifiedMetrics metrics={metrics} onInspect={openInspect} /> },
+    {
+      key: "metrics",
+      // aggregates already shown (and badged) on a KPI card are not repeated here
+      node: otherMetrics.length > 0 && <CertifiedMetrics metrics={otherMetrics} onInspect={openInspect} />,
+    },
     {
       key: "drivers",
       // "what changed" compares the whole dataset's latest two months, so its
@@ -424,7 +456,6 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
           filters={filters} dateFrom={dateFrom} dateTo={dateTo} onInspect={openInspect} />
       ),
     },
-    { key: "growth", node: <GrowthStrip growth={dashboard.growth} measure={measure} /> },
     { key: "insights", node: <InsightsPanel insights={dashboard.insights} onInvestigate={investigate} /> },
     { key: "narrative", node: <AiNarrative datasetId={datasetId} /> },
     {
@@ -644,6 +675,14 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
           </div>
         )}
         {exporting && <div className="export-busy no-export" role="status">Preparing {exporting.toUpperCase()}…</div>}
+
+        {/* pinned first, outside the arrangeable sections: it is the page's answer */}
+        {show("summary") && measure && (
+          <SummaryCard datasetId={datasetId} measure={measure} subtype={subtypeOf(measure)}
+            filters={filters} dateFrom={dateFrom} dateTo={dateTo}
+            target={targetFor(targets, { measure, filters, date_from: dateFrom, date_to: dateTo })}
+            actions={actionsData?.actions} onOpen={openInspect} onSeeActions={seeAllActions} />
+        )}
 
         {arranging && (
           <div className="arrange-hint no-export">

@@ -4,7 +4,6 @@ import { exportPdf, exportPng } from "../export";
 import { mappableFraction } from "../geo";
 import { orderSections } from "../sections";
 import KpiCard from "./KpiCard";
-import GrowthStrip from "./GrowthStrip";
 import InsightsPanel from "./InsightsPanel";
 import ForecastChart from "./ForecastChart";
 import BreakdownChart from "./BreakdownChart";
@@ -83,13 +82,12 @@ export default function PublicDashboard({ token }) {
         node: (
           <div className="kpi-row">
             {dashboard.kpis.map((kpi) => (
-              <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
+              <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure} growth={dashboard.growth?.[kpi.column]}
                 onSelect={() => inspect({ measure: kpi.column })} />
             ))}
           </div>
         ),
       },
-      { key: "growth", node: <GrowthStrip growth={dashboard.growth} measure={measure} /> },
       {
         key: "insights",
         node: <InsightsPanel insights={dashboard.insights} onInvestigate={(d) => inspect({

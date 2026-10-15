@@ -22,7 +22,7 @@ from .engine import get_dataset
 SECTION_KEYS = {
     "kpis", "metrics", "drivers", "growth", "insights", "narrative", "forecast",
     "breakdowns", "map", "pareto", "treemap", "correlations", "distributions", "profile",
-    "tree", "actions",
+    "tree", "actions", "summary",
 }
 MAX_CONFIG_BYTES = 8192
 MAX_NAME = 80

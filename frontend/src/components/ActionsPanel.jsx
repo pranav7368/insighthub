@@ -7,11 +7,16 @@ const SEVERITY_LABEL = { high: "Act now", medium: "Worth a look", low: "Opportun
  * Recommended actions: rule-based next steps computed from the data. Each says
  * what to do, why (with the numbers), and opens the evidence that proves it.
  */
-export default function ActionsPanel({ datasetId, measure, filters, refreshKey, onOpen }) {
-  const [data, setData] = useState(null);
-  const key = JSON.stringify([datasetId, measure, filters, refreshKey]);
+// `data` may be passed in when the dashboard already fetched it (the summary
+// card shares the same list); otherwise the panel fetches its own.
+export default function ActionsPanel({ datasetId, measure, filters, refreshKey, onOpen, data: given }) {
+  const [fetched, setFetched] = useState(null);
+  const data = given !== undefined ? given : fetched;
+  const setData = setFetched;
+  const key = JSON.stringify([datasetId, measure, filters, refreshKey, given !== undefined]);
 
   useEffect(() => {
+    if (given !== undefined) return undefined;
     let live = true;
     getActions(datasetId, { measure, filters })
       .then((d) => { if (live) setData(d); })
@@ -23,7 +28,7 @@ export default function ActionsPanel({ datasetId, measure, filters, refreshKey, 
 
   if (!data || data.actions.length === 0) return null;
   return (
-    <div className="actions">
+    <div className="actions" id="recommended-actions">
       <div className="insights__title">
         Recommended actions <span className="insights__auto">rules over your numbers — open the evidence behind each</span>
       </div>
