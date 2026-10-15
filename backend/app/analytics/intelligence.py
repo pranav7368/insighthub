@@ -73,60 +73,44 @@ def _linear_fit(values: np.ndarray):
     return float(intercept), float(slope), fitted, resid_std
 
 
-def _seasonal_additive(values: np.ndarray, fitted: np.ndarray, period: int = 12) -> np.ndarray:
-    """Average detrended deviation per season slot (month-of-year)."""
-    resid = values - fitted
-    seasonal = np.zeros(period)
-    for s in range(period):
-        idx = np.arange(s, len(values), period)
-        if len(idx):
-            seasonal[s] = resid[idx].mean()
-    seasonal -= seasonal.mean()  # keep it zero-sum so it doesn't shift the level
-    return seasonal
-
-
 @dataclass
 class Forecast:
     method: str
     history: list[dict]
     forecast: list[dict]
+    label: str | None = None
+    accuracy: dict | None = None
 
     def as_dict(self):
-        return {"method": self.method, "history": self.history, "forecast": self.forecast}
+        return {"method": self.method, "label": self.label, "history": self.history,
+                "forecast": self.forecast, "accuracy": self.accuracy}
 
 
 def forecast_series(periods: list[str], values: list[float], subtype: str | None,
                     horizon: int = 3, non_negative: bool = True) -> Forecast:
-    """Project a monthly series forward. Linear trend, plus an additive
-    monthly-seasonal component when >= 2 full years are available. 95%
-    prediction band from residual spread, widening with horizon."""
+    """Project a monthly series forward with whichever standard model best
+    predicted this series' own recent past (see analytics/forecasting.py).
+    The 95% band comes from that model's real one-step backtest misses and
+    widens with the square root of the horizon."""
+    from .forecasting import forecast as _forecast
+
     y = np.asarray(values, dtype=float)
-    n = len(y)
     history = [{"period": p, "value": float(v)} for p, v in zip(periods, values)]
-    if n < 4:
+    if len(y) < 4:
         return Forecast(method="insufficient_history", history=history, forecast=[])
 
-    intercept, slope, fitted, resid_std = _linear_fit(y)
-    use_seasonal = n >= 24
-    seasonal = _seasonal_additive(y, fitted, 12) if use_seasonal else None
-    start_month = int(periods[-1].split("-")[1])  # month-of-year of last point
-
-    fut_periods = future_periods(periods[-1], horizon)
+    fit = _forecast(y, horizon)
     out = []
-    for h, p in enumerate(fut_periods, start=1):
-        t = n - 1 + h
-        point = intercept + slope * t
-        if seasonal is not None:
-            point += seasonal[(start_month - 1 + h) % 12]
-        # band widens with the square root of horizon (random-walk-like)
-        band = 1.96 * resid_std * math.sqrt(h)
+    for h, (p, point) in enumerate(zip(future_periods(periods[-1], horizon), fit["points"]), start=1):
+        point = float(point)
+        band = 1.96 * fit["band_sd"] * math.sqrt(h)
         lower, upper = point - band, point + band
         if non_negative:
             point, lower = max(point, 0.0), max(lower, 0.0)
         out.append({"period": p, "value": round(point, 2),
                     "lower": round(lower, 2), "upper": round(max(upper, 0.0), 2)})
-    method = "linear+seasonal" if use_seasonal else "linear"
-    return Forecast(method=method, history=history, forecast=out)
+    return Forecast(method=fit["method"], history=history, forecast=out,
+                    label=fit["label"], accuracy=fit["accuracy"])
 
 
 def moving_average(values: list[float], window: int = 3) -> list[float | None]:
@@ -265,9 +249,17 @@ def build_insights(
         fc = forecasts.get(pm, {}).get("forecast") or []
         if fc:
             nxt = fc[0]
+            acc = forecasts.get(pm, {}).get("accuracy") or {}
+            model = forecasts.get(pm, {}).get("label")
+            track = ""
+            if acc.get("mape") is not None:
+                # say how far the model has actually been off, on this series
+                track = (f" Using {model}, which was off by {acc['mape']:.0f}% on average when tested "
+                         f"against the last {acc['months']} months.")
             insights.append(Insight("info", f"Projected next month: {fv(pm, nxt['value'])}",
-                f"Based on the trend, {label} is projected at {fv(pm, nxt['value'])} in {nxt['period']} "
-                f"(range {fv(pm, nxt['lower'])}–{fv(pm, nxt['upper'])}). This is a model projection, not a guarantee.",
+                f"{label} is projected at {fv(pm, nxt['value'])} in {nxt['period']} "
+                f"(range {fv(pm, nxt['lower'])}–{fv(pm, nxt['upper'])}).{track} "
+                "This is a model projection, not a guarantee.",
                 "forecast", {"measure": pm}))
 
     # ---- concentration risk on the primary breakdown ----

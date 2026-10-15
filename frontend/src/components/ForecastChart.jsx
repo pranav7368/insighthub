@@ -54,7 +54,7 @@ export default function ForecastChart({ measure, subtype, forecast, anomalies, o
     }}>
       <div className="chart-card__title">
         {humanLabel(measure)} — trend & forecast
-        {proj.length > 0 && <span className="chart-card__tag">next {proj.length}mo · {forecast.method.replace("+", " + ")}</span>}
+        {proj.length > 0 && <span className="chart-card__tag">next {proj.length}mo · {forecast.label || forecast.method}</span>}
         {onPeriod && <span className="chart-card__tag">click a month for details</span>}
       </div>
       <ResponsiveContainer width="100%" height={300}>
@@ -94,6 +94,14 @@ export default function ForecastChart({ measure, subtype, forecast, anomalies, o
         <span><i className="lg lg--madash" /> 3-mo avg</span>
         {(anomalies || []).length > 0 && <span><i className="lg lg--dot" /> Anomaly</span>}
       </div>
+      {forecast.accuracy && (
+        <p className="forecast-accuracy">
+          Model chosen by testing {forecast.accuracy.candidates.length} standard models against what actually
+          happened over the last {forecast.accuracy.months} months; this one ({forecast.label}) was off by
+          {forecast.accuracy.mape != null ? ` ${forecast.accuracy.mape}% ` : " "}on average
+          {" "}(±{formatNumber(forecast.accuracy.mae, subtype)}). The shaded range comes from those real misses.
+        </p>
+      )}
     </div>
   );
 }

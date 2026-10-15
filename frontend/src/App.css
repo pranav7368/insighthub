@@ -1312,3 +1312,5 @@ kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fon
 
 .alert-pace-hint { flex-basis: 100%; margin: 0; font-size: 12px; }
 .target__alert { display: inline-block; padding: 0; margin: 2px 0 4px; font-size: 12.5px; }
+
+.forecast-accuracy { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
