@@ -2,6 +2,8 @@ import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { getSchema, listDatasets, overrideColumn, uploadDataset } from "./api";
 import Login from "./components/Login";
 import UploadButton from "./components/UploadButton";
+import Sidebar from "./components/Sidebar";
+import Icon from "./components/Icon";
 import TemplateGallery from "./components/TemplateGallery";
 import DashboardView from "./components/DashboardView";
 import TourOverlay from "./components/TourOverlay";
@@ -61,6 +63,10 @@ export default function App() {
   const [showBilling, setShowBilling] = useState(false);
   const [dashboardKey, setDashboardKey] = useState(0);  // bump to force dashboard reload after cleaning
   const [tourOn, setTourOn] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem("ih_sidebar") === "collapsed");
+  const [mobileNav, setMobileNav] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [notice, setNotice] = useState(null);       // e.g. an upload that failed
 
   const canEdit = role === "admin" || role === "editor";
   const isAdmin = role === "admin";
@@ -123,6 +129,18 @@ export default function App() {
     }
     return list;
   };
+  // the sidebar's upload: same flow, with its own busy state and error banner
+  const uploadFromSidebar = async (file) => {
+    setUploading(true);
+    setNotice(null);
+    try { await handleUpload(file); }
+    catch (err) { setNotice(err?.response?.data?.detail || "Upload failed. Check the file and try again."); }
+    finally { setUploading(false); }
+  };
+  const toggleCollapsed = () => setCollapsed((c) => {
+    localStorage.setItem("ih_sidebar", c ? "expanded" : "collapsed");
+    return !c;
+  });
 
   const handleConnected = async (newDatasetId) => {
     await refresh();
@@ -152,111 +170,97 @@ export default function App() {
     setDatasetId(null);
   };
 
-  // run a Manage-menu action and close the <details> dropdown
-  const runFromMenu = (fn) => (e) => {
-    e.currentTarget.closest("details")?.removeAttribute("open");
-    fn();
-  };
-
   if (!authed) return <Login onAuthed={(r) => { setAuthed(true); setRole(r || "admin"); }} />;
 
   const structuredDatasets = datasets.filter((d) => d.kind === "structured");
 
+  // dataset actions, shown in the dashboard's own header
+  const manageActions = canEdit ? [
+    { label: "Certified metrics", icon: "dashboard", run: () => setShowMetrics(true) },
+    ...(structuredDatasets.length >= 2 ? [{ label: "Link datasets", icon: "link", run: () => setShowJoin(true) }] : []),
+    { label: "Share dashboard", icon: "link", run: () => setShowShare(true) },
+    { label: "Alerts", icon: "help", run: () => setShowAlerts(true) },
+    { label: "Email reports", icon: "doc", run: () => setShowReports(true) },
+    ...(isAdmin ? [{ label: "Access & privacy", icon: "shield", run: () => setShowAccess(true) }] : []),
+    { label: "Update data", icon: "upload", run: () => setShowUpdate(true) },
+    { label: "Review columns", icon: "table", run: openSchema },
+    { label: "Data quality", icon: "filter", run: () => setShowQuality(true) },
+  ] : [];
+  const pageTitle = { compare: "Compare", ask: "Ask" }[tab];
+
   return (
-    <div className="app-shell">
-      <header className="app-header">
-        <div className="brand"><span className="brand__logo">◧</span> InsightHub</div>
-        <nav className="tabs" aria-label="Primary">
-          <button className={tab === "dashboard" ? "active" : ""} onClick={() => setTab("dashboard")}>Dashboard</button>
-          {structuredDatasets.length > 0 && (
-            <button className={tab === "compare" ? "active" : ""} onClick={() => setTab("compare")}>Compare</button>
-          )}
-          <button data-tour="ask" className={tab === "ask" ? "active" : ""} onClick={() => setTab("ask")}>Ask</button>
-        </nav>
-        <div className="app-header__actions">
-          {canEdit && structuredDatasets.length > 0 && (
-            <button className="ghost-btn" data-tour="templates" onClick={() => setShowTemplates(true)}>Templates</button>
-          )}
-          {canEdit && (
-            <button className="ghost-btn" data-tour="connect" onClick={() => setShowConnect(true)}>Connect source</button>
-          )}
-          {canEdit && <span data-tour="upload"><UploadButton onUpload={handleUpload} /></span>}
-          {isAdmin && <button className="ghost-btn" onClick={() => setShowTeam(true)}>Team</button>}
-          {isAdmin && <button className="ghost-btn" onClick={() => setShowBilling(true)}>Billing</button>}
-          <button className="icon-btn" title={`Theme: ${theme}`} aria-label="Toggle theme"
-            onClick={() => setTheme(theme === "dark" ? "light" : theme === "light" ? "auto" : "dark")}>
-            {theme === "dark" ? "☾" : theme === "light" ? "☀" : "◐"}
+    <div className={`app-shell app-shell--side${collapsed ? " is-collapsed" : ""}`}>
+      <Sidebar
+        tab={tab} onTab={setTab} datasets={datasets} datasetId={datasetId}
+        onChooseDataset={(id) => { chooseDataset(id); setTab("dashboard"); }}
+        canEdit={canEdit} isAdmin={isAdmin} uploading={uploading}
+        onUpload={uploadFromSidebar} onConnect={() => setShowConnect(true)} onTemplates={() => setShowTemplates(true)}
+        onTeam={() => setShowTeam(true)} onBilling={() => setShowBilling(true)}
+        onSecurity={() => setShowSecurity(true)} onTour={() => setTourOn(true)} onLogout={logout}
+        theme={theme} onTheme={setTheme}
+        collapsed={collapsed} onToggleCollapsed={toggleCollapsed}
+        mobileOpen={mobileNav} onCloseMobile={() => setMobileNav(false)}
+      />
+
+      <div className="app-main">
+        {/* phones: the sidebar becomes a drawer behind this bar */}
+        <header className="mobile-bar">
+          <button className="side-icon-btn" onClick={() => setMobileNav(true)} aria-label="Open menu">
+            <Icon name="menu" />
           </button>
-          <button className="icon-btn" title="Account & security" aria-label="Account and security"
-            onClick={() => setShowSecurity(true)}>&#9737;</button>
-          <button className="icon-btn" title="Replay the product tour" aria-label="Replay the product tour"
-            onClick={() => setTourOn(true)}>?</button>
-          <button className="ghost-btn" onClick={logout}>Log out</button>
-        </div>
-      </header>
+          <span className="brand"><span className="brand__logo" aria-hidden>◧</span> InsightHub</span>
+        </header>
 
-      {(tab === "dashboard" || tab === "compare") && structuredDatasets.length > 0 && (
-        <div className="toolbar">
-          <select className="dataset-select" aria-label="Choose dataset"
-            value={datasetId ?? ""} onChange={(e) => chooseDataset(e.target.value)}>
-            {structuredDatasets.map((d) => (
-              <option key={d.dataset_id} value={d.dataset_id}>{d.name} ({d.row_count} rows)</option>
-            ))}
-          </select>
-          {tab === "dashboard" && datasetId && canEdit && (
-            <details className="menu">
-              <summary className="menu__btn">Manage <span aria-hidden>▾</span></summary>
-              <div className="menu__list" role="menu">
-                <button role="menuitem" onClick={runFromMenu(() => setShowMetrics(true))}>Certified metrics</button>
-                {structuredDatasets.length >= 2 && (
-                  <button role="menuitem" onClick={runFromMenu(() => setShowJoin(true))}>Link datasets</button>
-                )}
-                <button role="menuitem" onClick={runFromMenu(() => setShowShare(true))}>Share dashboard</button>
-                <button role="menuitem" onClick={runFromMenu(() => setShowAlerts(true))}>Alerts</button>
-                <button role="menuitem" onClick={runFromMenu(() => setShowReports(true))}>Email reports</button>
-                {isAdmin && (
-                  <button role="menuitem" onClick={runFromMenu(() => setShowAccess(true))}>Access &amp; privacy</button>
-                )}
-                <button role="menuitem" onClick={runFromMenu(() => setShowUpdate(true))}>Update data</button>
-                <button role="menuitem" onClick={runFromMenu(openSchema)}>Review columns</button>
-                <button role="menuitem" onClick={runFromMenu(() => setShowQuality(true))}>Data quality</button>
-              </div>
-            </details>
-          )}
-        </div>
-      )}
-
-      <main className="main">
-        {tab === "dashboard" && (
-          structuredDatasets.length === 0 ? (
-            <div className="empty-state">
-              <h2>No spreadsheet data yet</h2>
-              <p>{canEdit
-                ? "Upload a CSV or Excel file — the dashboard builds itself. Or connect a Google Sheet / CSV link that stays in sync. Upload a PDF or Word document to ask questions about it in the “Ask” tab."
-                : "No dashboards have been added to this workspace yet. Ask an admin or editor to upload data or connect a source."}</p>
-              {canEdit && (
-                <>
-                  <div className="empty-state__actions">
-                    <UploadButton onUpload={handleUpload} label="Upload your data" primary />
-                    <button className="ghost-btn" onClick={() => setShowConnect(true)}>Connect a Google Sheet</button>
-                  </div>
-                  <div className="empty-state__divider"><span>or explore an industry template</span></div>
-                  <div className="tpl-anchor" data-tour="templates">
-                    <TemplateGallery onLoaded={handleConnected} />
-                  </div>
-                </>
-              )}
-            </div>
-          ) : (
-            datasetId && <DashboardView key={`${datasetId}-${dashboardKey}`} datasetId={datasetId} canEdit={canEdit}
-              onRequestAlert={(preset) => { setAlertPreset(preset); setShowAlerts(true); }} />
-          )
+        {notice && (
+          <div className="app-notice" role="alert">
+            {notice}
+            <button className="side-icon-btn" onClick={() => setNotice(null)} aria-label="Dismiss"><Icon name="close" size={16} /></button>
+          </div>
         )}
-        <Suspense fallback={<div className="empty-panel">Loading…</div>}>
-          {tab === "compare" && datasetId && <ComparePane key={datasetId} datasetId={datasetId} />}
-          {tab === "ask" && <AskView datasetId={datasetId} hasStructured={structuredDatasets.length > 0} />}
-        </Suspense>
-      </main>
+
+        <main className="main">
+          {pageTitle && (
+            <div className="page-head">
+              <h1 className="page-head__title">{pageTitle}</h1>
+              <p className="page-head__sub">
+                {tab === "compare" ? "Put two segments or two periods side by side."
+                  : "Ask your data or your documents in plain English — every answer shows the query behind it."}
+              </p>
+            </div>
+          )}
+          {tab === "dashboard" && (
+            structuredDatasets.length === 0 ? (
+              <div className="empty-state">
+                <h2>No spreadsheet data yet</h2>
+                <p>{canEdit
+                  ? "Upload a CSV or Excel file — the dashboard builds itself. Or connect a Google Sheet / CSV link that stays in sync. Upload a PDF or Word document to ask questions about it in the “Ask” tab."
+                  : "No dashboards have been added to this workspace yet. Ask an admin or editor to upload data or connect a source."}</p>
+                {canEdit && (
+                  <>
+                    <div className="empty-state__actions">
+                      <UploadButton onUpload={handleUpload} label="Upload your data" primary />
+                      <button className="ghost-btn" onClick={() => setShowConnect(true)}>Connect a Google Sheet</button>
+                    </div>
+                    <div className="empty-state__divider"><span>or explore an industry template</span></div>
+                    <div className="tpl-anchor" data-tour="templates">
+                      <TemplateGallery onLoaded={handleConnected} />
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              datasetId && <DashboardView key={`${datasetId}-${dashboardKey}`} datasetId={datasetId} canEdit={canEdit}
+                manageActions={manageActions}
+                datasetMeta={structuredDatasets.find((d) => d.dataset_id === datasetId)}
+                onRequestAlert={(preset) => { setAlertPreset(preset); setShowAlerts(true); }} />
+            )
+          )}
+          <Suspense fallback={<div className="empty-panel">Loading…</div>}>
+            {tab === "compare" && datasetId && <ComparePane key={datasetId} datasetId={datasetId} />}
+            {tab === "ask" && <AskView datasetId={datasetId} hasStructured={structuredDatasets.length > 0} />}
+          </Suspense>
+        </main>
+      </div>
 
       <Suspense fallback={null}>
       {showConnect && (

@@ -24,12 +24,15 @@ import ViewsBar from "./ViewsBar";
 import DashSection from "./DashSection";
 import DecompositionTree from "./DecompositionTree";
 import ActionsPanel from "./ActionsPanel";
+import Icon from "./Icon";
+import Popover from "./Popover";
 import DataMenu from "./DataMenu";
 import { mappableFraction } from "../geo";
 import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections";
 import { buildUrlSearch, makeCtx, readUrlState, targetFor } from "../drill";
 import { buildCommands } from "../palette";
-import { humanLabel } from "../format";
+import { formatDate, formatRange, humanLabel } from "../format";
+import { SECTIONS } from "../sections";
 
 // opened on demand, so their code is fetched on first use
 const Inspector = lazy(() => import("./Inspector"));
@@ -58,7 +61,7 @@ function initialFromUrl(datasetId) {
   return owns ? s : null;
 }
 
-export default function DashboardView({ datasetId, canEdit = false, onRequestAlert }) {
+export default function DashboardView({ datasetId, canEdit = false, onRequestAlert, manageActions = [], datasetMeta }) {
   const [fromUrl] = useState(() => initialFromUrl(datasetId));
   const [dashboard, setDashboard] = useState(null);
   const [activeMeasure, setActiveMeasure] = useState(fromUrl?.measure || null);
@@ -80,7 +83,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
   const [pair, setPair] = useState(null);            // user-chosen scatter pair
   const [customScatter, setCustomScatter] = useState(null);
   const [exporting, setExporting] = useState(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [nameRequest, setNameRequest] = useState(0);   // "Save as…" from the ⋯ menu
   const [hiddenSections, setHiddenSections] = useState([]);
   const [sectionOrder, setSectionOrder] = useState([]);
   const [arranging, setArranging] = useState(false);
@@ -147,7 +150,13 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
 
   const show = (key) => !hiddenSections.includes(key);
   const activeView = views.find((v) => v.view_id === activeViewId) || null;
-  const viewDirty = activeView ? canonConfig(activeView.config) !== canonConfig(currentConfig()) : false;
+  // A view that does not pin a measure follows whichever one the dashboard
+  // picks, so that choice is not an unsaved change.
+  const viewDirty = activeView
+    ? canonConfig(activeView.config) !== canonConfig({
+      ...currentConfig(), measure: activeView.config?.measure ? activeMeasure : null,
+    })
+    : false;
 
   const runExport = async (kind) => {
     if (!contentRef.current) return;
@@ -251,7 +260,9 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
       if (activeMeasure) params.measure = activeMeasure;
       const data = await getDashboard(datasetId, params);
       setDashboard(data);
-      if (!activeMeasure && data.chosen_measure) setActiveMeasure(data.chosen_measure);
+      // only fill in a measure if nothing has chosen one meanwhile: the saved
+      // default view may have been applied while this request was in flight
+      if (data.chosen_measure) setActiveMeasure((m) => m || data.chosen_measure);
     } catch (err) {
       setError(errorText(err, "Could not load the dashboard."));
     }
@@ -513,64 +524,126 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
 
   return (
     <div className={`dash-layout${inspectCtx ? " has-inspector" : ""}`}>
-      <div className={`filter-panel${filtersOpen ? " filter-panel--open" : ""}`}>
-        <FilterBar
-          filterOptions={dashboard.filter_options}
-          activeFilters={filters}
-          onFilterChange={(name, value) =>
-            setFilters((prev) => {
-              const next = { ...prev };
-              if (value) next[name] = value; else delete next[name];
-              return next;
-            })
-          }
-          dateFrom={dateFrom} dateTo={dateTo}
-          onDateFromChange={setDateFrom} onDateToChange={setDateTo}
-          onReset={() => { setFilters({}); setDateFrom(undefined); setDateTo(undefined); }}
-        />
-      </div>
-
       <div className="dash-content" ref={contentRef}>
-        <div className="dash-topline">
-          <div className="dash-topline__title">
-            {dashboard.dataset?.name}
-            <span className="dash-topline__rows">{dashboard.row_count_filtered?.toLocaleString("en-IN")} rows</span>
+        <header className="page-head page-head--dash">
+          <div className="page-head__text">
+            <h1 className="page-head__title">{dashboard.dataset?.name}</h1>
+            <p className="page-head__sub">
+              {dashboard.row_count_filtered?.toLocaleString("en-IN")} rows
+              {datasetMeta && dashboard.row_count_filtered !== datasetMeta.row_count &&
+                ` of ${Number(datasetMeta.row_count).toLocaleString("en-IN")}`}
+              {dashboard.data_profile?.date_span?.to && <> · data up to {formatDate(dashboard.data_profile.date_span.to)}</>}
+            </p>
           </div>
-          <div className="dash-topline__actions" data-tour="views">
-            <button className="palette-btn no-export" onClick={() => setPaletteOpen(true)}
-              aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} title="Find any number, segment or action">
-              <span aria-hidden>⌕</span> Search <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
-            </button>
-            <ViewsBar
-              views={views} activeViewId={activeViewId} dirty={viewDirty}
-              hiddenSections={hiddenSections} arranging={arranging}
-              onApply={applyView} onToggleSection={toggleSection}
-              onSave={saveView} onUpdate={updateActiveView}
-              onDelete={deleteActiveView} onSetDefault={setDefaultActiveView}
-              onToggleArrange={() => setArranging((a) => !a)}
-            />
-            <button className="filters-toggle no-export" onClick={() => setFiltersOpen((o) => !o)}>
-              Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-            </button>
-            <DateRangePresets
-              dateSpan={dashboard.data_profile?.date_span}
-              activeFrom={dateFrom}
-              onApply={(from, to) => { setDateFrom(from); setDateTo(to); }}
-              onClear={() => { setDateFrom(undefined); setDateTo(undefined); }}
-            />
-            <div className="export-btns no-export">
-              <button onClick={() => runExport("pdf")} disabled={exporting}>
-                {exporting === "pdf" ? "…" : "Export PDF"}
-              </button>
-              <button onClick={() => runExport("png")} disabled={exporting}>
-                {exporting === "png" ? "…" : "PNG"}
-              </button>
-              <button onClick={() => exportDatasetCsv(datasetId, dashboard.dataset?.name)}>CSV</button>
-            </div>
-          </div>
+          {manageActions.length > 0 && (
+            <Popover menu align="end" className="no-export" label="Manage" buttonClass="tb-btn"
+              icon={<Icon name="settings" size={16} />}>
+              {() => manageActions.map((a) => (
+                <button key={a.label} role="menuitem" className="menu-item" onClick={a.run}>
+                  <Icon name={a.icon} /> {a.label}
+                </button>
+              ))}
+            </Popover>
+          )}
+        </header>
+
+        <div className="toolbar-row no-export" data-tour="views" role="toolbar" aria-label="Dashboard controls">
+          <ViewsBar
+            views={views} activeViewId={activeViewId} dirty={viewDirty}
+            onApply={applyView} onSave={saveView} onUpdate={updateActiveView} nameRequest={nameRequest}
+          />
+          <DateRangePresets
+            dateSpan={dashboard.data_profile?.date_span}
+            activeFrom={dateFrom}
+            onApply={(from, to) => { setDateFrom(from); setDateTo(to); }}
+            onClear={() => { setDateFrom(undefined); setDateTo(undefined); }}
+          />
+          <Popover align="start" className="filter-pop" title="Filters"
+            icon={<Icon name="filter" size={16} />}
+            label={<>Filter{activeFilterCount > 0 && <span className="tb-count">{activeFilterCount}</span>}</>}>
+            {() => (
+              <FilterBar
+                filterOptions={dashboard.filter_options}
+                activeFilters={filters}
+                onFilterChange={(name, value) =>
+                  setFilters((prev) => {
+                    const next = { ...prev };
+                    if (value) next[name] = value; else delete next[name];
+                    return next;
+                  })
+                }
+                dateFrom={dateFrom} dateTo={dateTo}
+                onDateFromChange={setDateFrom} onDateToChange={setDateTo}
+                onReset={() => { setFilters({}); setDateFrom(undefined); setDateTo(undefined); }}
+              />
+            )}
+          </Popover>
+
+          <div className="toolbar-row__spacer" />
+
+          <button className="tb-btn palette-btn" onClick={() => setPaletteOpen(true)}
+            aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} title="Find any number, segment or action">
+            <Icon name="search" size={16} /> Search <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
+          <Popover menu align="end" title="More actions" buttonClass="tb-btn tb-btn--icon"
+            icon={<Icon name="more" size={18} />} buttonProps={{ "aria-label": "More actions" }}>
+            {() => (
+              <>
+                <div className="menu-label">This view</div>
+                <button role="menuitem" className="menu-item" onClick={() => setNameRequest((n) => n + 1)}>
+                  <Icon name="plus" /> Save as a new view…
+                </button>
+                {activeView && (
+                  <>
+                    <button role="menuitem" className="menu-item" onClick={setDefaultActiveView} disabled={activeView.is_default}>
+                      <Icon name="layout" /> {activeView.is_default ? "Default view ★" : "Open this dataset on this view"}
+                    </button>
+                    <button role="menuitem" className="menu-item menu-item--danger" onClick={deleteActiveView}>
+                      <Icon name="close" /> Delete this view
+                    </button>
+                  </>
+                )}
+                <button role="menuitem" className="menu-item" onClick={() => setArranging((a) => !a)}>
+                  <Icon name="layout" /> {arranging ? "Finish arranging" : "Arrange sections"}
+                </button>
+                <div className="menu-sep" role="separator" />
+                <div className="menu-label">Show sections</div>
+                <div className="menu-checks">
+                  {SECTIONS.map(([key, label]) => (
+                    <button key={key} role="menuitemcheckbox" aria-checked={!hiddenSections.includes(key)}
+                      className="menu-item menu-item--check" onClick={() => toggleSection(key)}>
+                      <span className="menu-check" aria-hidden>{hiddenSections.includes(key) ? "" : "✓"}</span> {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="menu-sep" role="separator" />
+                <div className="menu-label">Export</div>
+                <button role="menuitem" className="menu-item" onClick={() => runExport("pdf")} disabled={Boolean(exporting)}>
+                  <Icon name="download" /> PDF
+                </button>
+                <button role="menuitem" className="menu-item" onClick={() => runExport("png")} disabled={Boolean(exporting)}>
+                  <Icon name="download" /> PNG image
+                </button>
+                <button role="menuitem" className="menu-item" onClick={() => exportDatasetCsv(datasetId, dashboard.dataset?.name)}>
+                  <Icon name="download" /> Data as CSV
+                </button>
+              </>
+            )}
+          </Popover>
         </div>
 
-        <FilterChips filters={filters} onRemove={removeFilter} onClearAll={() => setFilters({})} />
+        {(Object.keys(filters).length > 0 || dateFrom || dateTo) && (
+          <div className="active-scope no-export">
+            {(dateFrom || dateTo) && (
+              <button className="chip" onClick={() => { setDateFrom(undefined); setDateTo(undefined); }}
+                title="Remove the date range">
+                <Icon name="calendar" size={14} /> {formatRange(dateFrom, dateTo)} <span className="chip__x">×</span>
+              </button>
+            )}
+            <FilterChips filters={filters} onRemove={removeFilter} onClearAll={() => setFilters({})} />
+          </div>
+        )}
+        {exporting && <div className="export-busy no-export" role="status">Preparing {exporting.toUpperCase()}…</div>}
 
         {arranging && (
           <div className="arrange-hint no-export">

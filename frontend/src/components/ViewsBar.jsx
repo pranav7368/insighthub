@@ -1,11 +1,15 @@
-import { useState } from "react";
-import { SECTIONS } from "../sections";
+import { useEffect, useState } from "react";
 
-export default function ViewsBar({
-  views, activeViewId, dirty, hiddenSections, arranging,
-  onApply, onToggleSection, onSave, onUpdate, onDelete, onSetDefault, onToggleArrange,
-}) {
+/**
+ * The saved-view switcher: the picker plus the one action you most often want
+ * next (save this view, or update it when it has changed). Less frequent view
+ * actions — set default, delete, arrange, show/hide sections — live in the
+ * toolbar's "⋯" menu, so the toolbar stays one calm line.
+ */
+// `nameRequest`: bump it to open the name field from elsewhere ("Save as…" in the ⋯ menu)
+export default function ViewsBar({ views, activeViewId, dirty, onApply, onSave, onUpdate, nameRequest = 0 }) {
   const [naming, setNaming] = useState(false);
+  useEffect(() => { if (nameRequest) setNaming(true); }, [nameRequest]);
   const [name, setName] = useState("");
   const active = views.find((v) => v.view_id === activeViewId) || null;
 
@@ -21,7 +25,7 @@ export default function ViewsBar({
   return (
     <div className="views-bar no-export">
       <select
-        className="views-select"
+        className="tb-select"
         aria-label="Saved view"
         value={activeViewId || ""}
         onChange={(e) => {
@@ -37,52 +41,18 @@ export default function ViewsBar({
         ))}
       </select>
 
-      {active ? (
-        <>
-          {dirty && <button className="views-btn views-btn--accent" onClick={onUpdate}>Update</button>}
-          <button className="views-btn" onClick={onSetDefault} disabled={active.is_default}
-            title="Open this dataset on this view">
-            {active.is_default ? "★ Default" : "Set default"}
-          </button>
-          <button className="views-btn views-btn--danger" onClick={() => onDelete(active)}>Delete</button>
-          <button className="views-btn" onClick={() => setNaming((s) => !s)}>Save as…</button>
-        </>
-      ) : (
-        <button className="views-btn views-btn--accent" onClick={() => setNaming((s) => !s)}>Save view</button>
-      )}
+      {active && dirty && <button className="tb-btn tb-btn--accent" onClick={onUpdate}>Update view</button>}
+      {!active && !naming && <button className="tb-btn" onClick={() => setNaming(true)}>Save view</button>}
 
       {naming && (
         <form className="views-name" onSubmit={submitName}>
-          <input autoFocus value={name} placeholder="View name" onChange={(e) => setName(e.target.value)} />
-          <button className="views-btn views-btn--accent" type="submit">Save</button>
+          <input autoFocus value={name} placeholder="View name" aria-label="View name"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") setNaming(false); }} />
+          <button className="tb-btn tb-btn--accent" type="submit">Save</button>
         </form>
       )}
-
-      <button
-        className={`views-btn views-btn--arrange${arranging ? " is-on" : ""}`}
-        onClick={onToggleArrange} aria-pressed={arranging}
-        title="Drag sections into the order you want"
-      >
-        <span aria-hidden>⇅</span> {arranging ? "Done" : "Arrange"}
-      </button>
-
-      <details className="menu views-customize">
-        <summary className="menu__btn">
-          Customize{hiddenSections.length > 0 ? ` (${hiddenSections.length} hidden)` : ""} <span aria-hidden>▾</span>
-        </summary>
-        <div className="menu__list menu__list--checks" role="menu">
-          {SECTIONS.map(([key, label]) => (
-            <label key={key} className="views-check">
-              <input
-                type="checkbox"
-                checked={!hiddenSections.includes(key)}
-                onChange={() => onToggleSection(key)}
-              />
-              {label}
-            </label>
-          ))}
-        </div>
-      </details>
     </div>
   );
 }
+

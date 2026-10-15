@@ -16,3 +16,33 @@ export function formatNumber(value, subtype) {
 export function humanLabel(name) {
   return String(name).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+// ------------------------------------------------------------ dates ---
+// Human dates from the API's ISO strings. Parsed as calendar parts, never via
+// Date + toISOString, so a timezone can never move a day.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2026-10-28" -> "28 Oct 2026"; "2026-10" -> "Oct 2026"; "2026-Q4" / "2026" pass through. */
+export function formatDate(iso) {
+  if (!iso) return "";
+  const s = String(iso);
+  const m = s.match(/^(\d{4})-(\d{2})(?:-(\d{2}))?/);
+  if (!m) return s;
+  const [, y, mo, d] = m;
+  const month = MONTHS[Number(mo) - 1];
+  if (!month) return s;
+  return d ? `${Number(d)} ${month} ${y}` : `${month} ${y}`;
+}
+
+/** A from/to pair as one phrase: "Oct 2026", "1 Jan – 28 Oct 2026", "from Mar 2025". */
+export function formatRange(from, to) {
+  if (from && to) {
+    if (from === to) return formatDate(from);
+    const a = formatDate(from), b = formatDate(to);
+    const sameYear = String(from).slice(0, 4) === String(to).slice(0, 4);
+    return `${sameYear ? a.replace(/ \d{4}$/, "") : a} – ${b}`;
+  }
+  if (from) return `from ${formatDate(from)}`;
+  if (to) return `until ${formatDate(to)}`;
+  return "";
+}
