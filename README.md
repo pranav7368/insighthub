@@ -32,12 +32,16 @@ Most "AI + BI" tools hallucinate numbers. InsightHub is built so they can't:
 | **Data quality** | Missing values, duplicate rows, outliers (IQR), mixed-format flags + one-click cleaning (drop duplicates, fill mean/median/mode). |
 | **Dashboard** | KPI cards with MoM delta + sparklines, trend **forecast** (linear + seasonal, 95% band) with **anomaly** markers and a 3-month moving average, breakdown bars, contribution donut, **Pareto (80/20)**, **treemap**, **geographic bubble map** (when a location column is present), **correlation matrix** + **scatter**, distributions (min/median/max/σ), data-profile. |
 | **Auto metrics** | MoM / QoQ / YoY growth, moving averages, standard deviation, correlations, Pareto. |
-| **Certified metrics** | Define a metric once — an aggregate (`SUM(revenue)`) or a ratio (`SUM(profit)/SUM(revenue)`) — and it's computed consistently everywhere, shown on the dashboard with a **"Show SQL"** toggle so anyone can verify the exact query. Definitions are constrained (whitelisted aggregate + validated columns), never free-form SQL. |
+| **Certified metrics** | Define a metric once — an aggregate (`SUM(revenue)`) or a ratio (`SUM(profit)/SUM(revenue)`) — and it's computed consistently everywhere, shown on the dashboard with a **"Show SQL"** toggle so anyone can verify the exact query. Definitions are constrained (whitelisted aggregate + validated columns), never free-form SQL. **"What moved it?"** splits a ratio's change exactly into its numerator and denominator effects (did margin rise because profit grew, or because revenue shrank?) and opens either part. |
 | **Auto insights** | Deterministic "Key insights" (concentration risk, trends, anomalies, margin, leader, Pareto) — always grounded. |
 | **What changed (drivers)** | Root-cause analysis: decomposes a measure's period-over-period change by dimension so you see *why* it moved ("revenue rose 12% — Delhi +₹8k drove it, Mumbai gave back ₹2k"). Deterministic, follows the active measure, switchable by dimension. |
 | **AI narrative** | On-demand executive brief + prioritized **recommendations** from any LLM, with the number gate. |
-| **Ask** | *Data* mode: chat with your numbers (grounded text-to-query, auto-chart) with a **"show SQL"** toggle on every answer so you can verify the exact query. *Documents* mode: cited Q&A over PDFs/Word with an abstention path. |
-| **Interactivity** | Filters, **click-to-drill-down** (any bar/slice filters the whole dashboard), **day-level date range** (+ 3M/6M/12M presets), **compare** two segments or two periods side-by-side. |
+| **Ask** | *Data* mode: chat with your numbers (grounded text-to-query, auto-chart) with a **"show SQL"** toggle on every answer so you can verify the exact query. Asked from inside a drill, the question stays inside that slice ("revenue by product" from *Region: North, Nov* means North's November). *Documents* mode: cited Q&A over PDFs/Word with an abstention path. |
+| **Drill into any number** | Click any KPI, bar, slice, trend month, driver or insight and a details panel opens on that exact slice: the value, the **formula in plain words and the exact SQL**, its spread (min / median / max / σ), the trend at **day / week / month / quarter / year**, the change vs the previous period and the same period last year, the biggest contributors in every dimension, a fully ranked breakdown, and the **actual rows** behind it (sortable, CSV). Click a contributor or a period to go a level deeper — breadcrumbs walk back up, and the drill lives in the URL (back button, reload, shareable link). Row rules and PII masking apply at every level. |
+| **Why it changed** | A **variance waterfall** that reconciles to the cent, split by the dimension that best explains the move (auto, or your choice); **like-for-like periods** (a partial October is compared with the same days of September, not all of it); a **price / volume / mix** split for value = quantity × price; a **decomposition tree** to descend the change level by level; and a **significance** label — *normal / notable / unusual* against the series' usual swing — so a dashboard never sells noise as news. |
+| **Targets** | Set a target for any measure, period (month / quarter / year / week / day) and segment. Shows actual vs target, a straight **run-rate projection** you can check by hand, status (met / on track / at risk / off track / missed) and what the remaining days need per day — in the details panel and on the KPI card. |
+| **Recommended actions** | Rule-based next steps — an unusual move, a target at risk, a segment falling 15 %+, price cuts eating value, a dependency on one customer or product, missing values, a segment worth repeating — each with the numbers behind it and **"see the evidence"**, which opens the exact slice that proves it. |
+| **Interactivity** | Filters (the details panel's **"Show this on the dashboard"** applies a drilled slice), **day-level date range** with **MTD / QTD / YTD** and 3M / 6M / 12M presets, **compare** two segments or two periods side-by-side, **right-click any number** for every way into it, and **Ctrl/⌘ K** to jump to any measure, segment value, section, view or action. |
 | **Industry templates** | Pick **Retail, SaaS, E-commerce, Logistics or Healthcare** on the empty state and get a working dashboard in one click — realistic 12-month data **plus** the certified metrics that industry reports on **plus** a default saved view arranged to tell that story. |
 | **Guided onboarding** | A first-run **product tour** spotlights the real UI (upload, live sources, templates, saved views, Ask) and adapts to what is on screen; replay it any time from the **?** in the header. |
 | **Saved views** | Save the current dashboard state (filters, date range, chosen measure) **and** which sections are shown **and the order they appear in** as a named **view**; switch between views, set a **default** that auto-loads, and hide/show any section from a **Customize** menu. |
@@ -64,7 +68,9 @@ Most "AI + BI" tools hallucinate numbers. InsightHub is built so they can't:
                          │   ingest/        parse → detect roles → per-tenant DuckDB table  |  chunks (docs) │
                          │   analytics/     engine (SQL KPIs/trends/breakdowns) · intelligence (forecast,    │
                          │                  anomaly, growth, pareto, insights) · correlation · quality ·     │
-                         │                  nlquery (text→query) · narrative (LLM brief + number gate)       │
+                         │                  nlquery (text→query) · narrative (LLM brief + number gate)  ·    │
+                         │                  drill (inspect/breakdown/rows) · variance (waterfall, PVM,       │
+                         │                  significance) · targets · actions · metrictree                   │
                          │   core/sqlsafe   every identifier validated + whitelisted (SQL-injection defense) │
                          │   qa/llm.py      provider-agnostic LLM (Claude/OpenAI/Gemini/Ollama/… or offline) │
                          └───────────────────────────────────────┬─────────────────────────────────────────┘
@@ -165,9 +171,10 @@ backend/
     api/deps.py             JWT → workspace principal (tenant isolation)
     ingest/                 parsers (csv/xlsx/pdf/docx/txt) + chunking + pipeline
     analytics/              detect · engine · intelligence · correlation · quality · nlquery · narrative
+                            drill · variance · targets · actions · metrictree (drill-down + analyst layer)
     qa/                     llm (multi-provider + offline) · engine · gates
     prompts/                reviewable plain-text LLM prompts
-  tests/                    501 tests (pytest)
+  tests/                    552 tests (pytest)
   scripts/make_sample_data.py
 frontend/
   src/
@@ -180,14 +187,17 @@ run.sh · run.ps1 · .env.example
 
 ```bash
 cd backend
-IH_OFFLINE=1 .venv/Scripts/python -m pytest -q     # 501 tests (4 need Postgres)
+IH_OFFLINE=1 .venv/Scripts/python -m pytest -q     # 552 tests (4 need Postgres)
 ```
 
 Covers: SQL-injection defense, tenant isolation, per-format ingestion,
 auto-detection, data quality + cleaning, aggregation, forecasting, anomaly
 detection, growth/Pareto/moving-average, correlation/scatter/treemap,
 text-to-query (grounded), the citation gates, the narrative number gate, and
-multi-provider LLM dispatch. LLM calls are mocked or offline throughout.
+multi-provider LLM dispatch, drill-down and variance maths (every waterfall
+reconciles, price/volume/mix adds up), targets, recommended actions, and row
+rules + masking on every drill path over HTTP. LLM calls are mocked or offline
+throughout. Frontend: `cd frontend && npm test` (128 tests, incl. axe checks).
 
 ## Sample data
 
@@ -200,8 +210,9 @@ branch, and one anomaly) at `../sample_company_sales.csv` to upload and explore.
 ## Roadmap (optional next steps)
 
 Next connectors (**database** — Postgres/MySQL — and **SaaS** — Stripe /
-QuickBooks / Shopify), Stripe **billing**, scheduled/emailed **PDF reports**
-(alerts already ship via webhook), and richer forecasting (ARIMA/Prophet). The
+QuickBooks / Shopify), scheduled/emailed **PDF reports** (alerts already ship
+via webhook), the details panel on **public share links** (they still use
+click-to-filter), and richer forecasting (ARIMA/Prophet). The
 geographic map ships with a
 bundled India outline + city coordinates (`src/geo.js`); extend `PLACES` there
 for more locations/countries.
