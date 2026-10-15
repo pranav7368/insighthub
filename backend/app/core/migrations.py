@@ -157,6 +157,24 @@ MIGRATIONS: tuple[Migration, ...] = (
         description="admins can require a second factor for the whole workspace",
         statements=_add_bool_column("workspaces", "require_mfa", False),
     ),
+    Migration(
+        id="0009_targets",
+        description="per-period targets for a measure, optionally for one segment",
+        statements=(
+            """CREATE TABLE IF NOT EXISTS targets (
+                   target_id    VARCHAR PRIMARY KEY,
+                   workspace_id VARCHAR NOT NULL,
+                   dataset_id   VARCHAR NOT NULL,
+                   measure      VARCHAR NOT NULL,
+                   grain        VARCHAR NOT NULL,
+                   period       VARCHAR NOT NULL,
+                   value        DOUBLE NOT NULL,
+                   filters      VARCHAR NOT NULL,
+                   created_by   VARCHAR,
+                   created_at   TIMESTAMP DEFAULT current_timestamp
+               )""",
+        ),
+    ),
 )
 
 

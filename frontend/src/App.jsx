@@ -241,7 +241,7 @@ export default function App() {
               )}
             </div>
           ) : (
-            datasetId && <DashboardView key={`${datasetId}-${dashboardKey}`} datasetId={datasetId} />
+            datasetId && <DashboardView key={`${datasetId}-${dashboardKey}`} datasetId={datasetId} canEdit={canEdit} />
           )
         )}
         {tab === "compare" && datasetId && <ComparePane key={datasetId} datasetId={datasetId} />}

@@ -32,7 +32,7 @@ from .analytics.alerts import (
     run_due_alerts, send_test, set_enabled,
 )
 from .analytics.semantic import (
-    MetricError, create_metric, delete_metric, list_metrics,
+    MetricError, MetricNotFound, create_metric, delete_metric, list_metrics,
 )
 from .analytics.drivers import DriverError, explain_change
 from .analytics.drill import (
@@ -40,6 +40,11 @@ from .analytics.drill import (
     records as drill_records, records_csv as drill_records_csv,
 )
 from .analytics.variance import explain_variance, price_volume_mix
+from .analytics.actions import recommend
+from .analytics.metrictree import explain_metric
+from .analytics.targets import (
+    TargetError, delete_target, evaluate as evaluate_target, list_targets, set_target,
+)
 from .analytics.rls import (
     RuleError, RuleNotFound, create_rule, delete_rule, list_rules, secured_relation,
 )
@@ -1400,6 +1405,65 @@ def pvm_slice(dataset_id: str, measure: str | None = None, volume: str | None = 
                   compare=compare, dimension=dimension, limit=limit)
 
 
+@app.get("/api/datasets/{dataset_id}/actions")
+def recommended_actions(dataset_id: str, measure: str | None = None, filters: str | None = None,
+                        principal: Principal = Depends(get_principal)):
+    """Rule-based next steps, each with the numbers behind it and the drill
+    slice that reproduces them."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(recommend, dataset_id, principal, measure=measure, filters=parsed)
+
+
+# ------------------------------------------------------------ targets ----
+
+class TargetBody(BaseModel):
+    measure: str
+    grain: str = "month"
+    period: str
+    value: float
+    filters: dict = {}
+
+
+@app.get("/api/datasets/{dataset_id}/targets")
+def get_targets(dataset_id: str, principal: Principal = Depends(get_principal)):
+    """Every target on the dataset, evaluated for the member asking (their row
+    rules apply to the actuals, so a regional viewer sees their region's pace)."""
+    con = db.connect()
+    try:
+        get_dataset(con, principal.workspace_id, dataset_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    return list_targets(con, principal.workspace_id, dataset_id, principal.user_id)
+
+
+@app.post("/api/datasets/{dataset_id}/targets")
+def put_target(dataset_id: str, body: TargetBody, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    try:
+        target = set_target(con, principal.workspace_id, dataset_id, measure=body.measure,
+                            grain=body.grain, period=body.period, value=body.value,
+                            filters=body.filters, user_id=principal.user_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except (TargetError, DrillError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "target_set",
+             f"{body.measure} {body.period} {body.value}")
+    return evaluate_target(con, principal.workspace_id, dataset_id, target, principal.user_id)
+
+
+@app.delete("/api/targets/{target_id}")
+def remove_target(target_id: str, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    if not delete_target(con, principal.workspace_id, target_id):
+        raise HTTPException(status_code=404, detail="target not found")
+    db.audit(con, principal.workspace_id, principal.user_id, "target_delete", target_id)
+    return {"ok": True}
+
+
 # --------------------------------------------- certified metrics ---------
 
 class MetricCreateBody(BaseModel):
@@ -1440,6 +1504,23 @@ def remove_metric(metric_id: str, principal: Principal = Depends(require_editor)
         raise HTTPException(status_code=404, detail="metric not found")
     db.audit(con, principal.workspace_id, principal.user_id, "metric_delete", metric_id)
     return {"ok": True}
+
+
+@app.get("/api/metrics/{metric_id}/explain")
+def metric_explain(metric_id: str, grain: str = "month", compare: str = "previous",
+                   principal: Principal = Depends(get_principal)):
+    """Why a certified metric moved: a ratio split exactly into the effect of
+    its numerator and of its denominator."""
+    con = db.connect()
+    try:
+        return explain_metric(con, principal.workspace_id, metric_id, grain=grain, compare=compare,
+                              user_id=principal.user_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except MetricNotFound:
+        raise HTTPException(status_code=404, detail="metric not found")
+    except (MetricError, DrillError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # ------------------------------------------------ row-level security -----
@@ -1639,6 +1720,8 @@ def clean_data(dataset_id: str, body: CleanBody, principal: Principal = Depends(
 
 class DataQueryBody(BaseModel):
     question: str
+    # optional drill slice the question is asked from: {filters, date_from, date_to}
+    context: dict | None = None
 
 
 @app.post("/api/datasets/{dataset_id}/query")
@@ -1649,7 +1732,7 @@ def query_data(dataset_id: str, body: DataQueryBody, principal: Principal = Depe
     con = db.connect()
     try:
         result = answer_data_question(con, principal.workspace_id, dataset_id, body.question,
-                                      user_id=principal.user_id)
+                                      user_id=principal.user_id, context=body.context)
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
     except QueryError as exc:

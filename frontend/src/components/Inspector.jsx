@@ -3,10 +3,12 @@ import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis
 import { errorText, getBreakdown, getInspect } from "../api";
 import { formatNumber, humanLabel } from "../format";
 import {
-  AGG_LABELS, GRAINS, crumbs, drillInto, drillPeriod, pctText, truncateCtx,
+  AGG_LABELS, GRAINS, crumbs, drillInto, drillPeriod, pctText, targetFor, truncateCtx,
 } from "../drill";
 import RecordsTable from "./RecordsTable";
 import ChangeAnalysis from "./ChangeAnalysis";
+import AskInContext from "./AskInContext";
+import TargetPanel from "./TargetPanel";
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -14,6 +16,7 @@ const TABS = [
   { key: "change", label: "Why it changed", when: (d) => d.trend && d.additive },
   { key: "breakdown", label: "Breakdown" },
   { key: "records", label: "Records" },
+  { key: "ask", label: "Ask" },
   { key: "proof", label: "How it's calculated" },
 ];
 
@@ -71,12 +74,13 @@ function ItemRow({ item, subtype, onClick }) {
   );
 }
 
-function Overview({ data, ctx, go }) {
+function Overview({ data, ctx, go, targetProps }) {
   const sub = data.subtype;
   const trend = data.trend;
   const lastPeriod = trend?.points?.at(-1)?.period;
   return (
     <>
+      {targetProps && <TargetPanel key={targetProps.targetKey} {...targetProps} />}
       {trend && (
         <section className="insp-block">
           <div className="insp-block__head">
@@ -278,7 +282,8 @@ function Proof({ data }) {
  * The drill-down drawer. Non-modal: the dashboard stays live behind it, so
  * clicking another chart simply re-targets the drawer.
  */
-export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply }) {
+export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply,
+  targets = [], canEdit = false, onTargetsChanged }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -381,7 +386,18 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
           </div>
 
           <div className="inspector__body" role="tabpanel" id="insp-panel" aria-labelledby={`insp-tab-${tab}`}>
-            {tab === "overview" && <Overview data={data} ctx={ctx} go={go} />}
+            {tab === "overview" && (
+              <Overview data={data} ctx={ctx} go={go}
+                targetProps={data.trend && onTargetsChanged ? (() => {
+                  const slice = { ...ctx, measure: data.measure };
+                  const target = targetFor(targets, slice);
+                  return {
+                    targetKey: target?.target_id || "new", datasetId, ctx: slice, target, subtype: data.subtype,
+                    lastDate: data.trend.data_through, canEdit, onChanged: onTargetsChanged,
+                  };
+                })() : null} />
+            )}
+            {tab === "ask" && <AskInContext datasetId={datasetId} ctx={{ ...ctx, measure: data.measure }} />}
             {tab === "breakdown" && <BreakdownTab datasetId={datasetId} data={data} ctx={ctx} go={go} />}
             {tab === "records" && <RecordsTable datasetId={datasetId} slice={ctx} name={data.dataset.name} />}
             {tab === "proof" && <Proof data={data} />}

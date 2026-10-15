@@ -1,7 +1,22 @@
 import { formatNumber, humanLabel } from "../format";
+import { TARGET_STATUS } from "../drill";
 import Sparkline from "./Sparkline";
 
-export default function KpiCard({ kpi, active, onSelect }) {
+function TargetLine({ target, subtype }) {
+  if (!target || target.status === "broken") return null;
+  const pct = Math.round(((target.status === "met" ? target.progress : target.projected_ratio) || 0) * 100);
+  return (
+    <span className={`kpi-card__target target--${target.status}`}
+      title={`${target.period} target ${formatNumber(target.value, subtype)}: ${TARGET_STATUS[target.status]}`}>
+      <span className="kpi-card__target-bar" aria-hidden>
+        <span style={{ width: `${Math.min(100, (target.progress || 0) * 100)}%` }} />
+      </span>
+      {TARGET_STATUS[target.status]} · {target.status === "met" ? `${pct}% of` : `pace ${pct}% of`} {formatNumber(target.value, subtype)}
+    </span>
+  );
+}
+
+export default function KpiCard({ kpi, active, onSelect, target }) {
   const delta = kpi.delta_pct;
   const hasDelta = delta !== null && delta !== undefined;
   const up = hasDelta && delta > 0;
@@ -25,6 +40,7 @@ export default function KpiCard({ kpi, active, onSelect }) {
         </span>
         <Sparkline values={kpi.sparkline} color={active ? "var(--series-1)" : "var(--text-muted)"} />
       </div>
+      <TargetLine target={target} subtype={kpi.subtype} />
     </button>
   );
 }

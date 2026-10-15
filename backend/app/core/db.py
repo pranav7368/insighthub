@@ -235,6 +235,21 @@ CREATE TABLE IF NOT EXISTS metrics (
     created_at   TIMESTAMP DEFAULT current_timestamp
 );
 
+-- Targets: the value a measure should reach in one period, optionally for one
+-- segment. Mirrored by migration 0009 for databases created before it.
+CREATE TABLE IF NOT EXISTS targets (
+    target_id    VARCHAR PRIMARY KEY,
+    workspace_id VARCHAR NOT NULL,
+    dataset_id   VARCHAR NOT NULL,
+    measure      VARCHAR NOT NULL,
+    grain        VARCHAR NOT NULL,      -- day | week | month | quarter | year
+    period       VARCHAR NOT NULL,      -- 2026-10, 2026-Q4, 2026, or a day
+    value        DOUBLE NOT NULL,
+    filters      VARCHAR NOT NULL,      -- JSON object, {} for the whole dataset
+    created_by   VARCHAR,
+    created_at   TIMESTAMP DEFAULT current_timestamp
+);
+
 -- Billing: one subscription row per workspace (absent = free/active). Plan
 -- gating is opt-in (IH_BILLING_ENABLED); Stripe fields are populated by the
 -- billing webhook, or a plan can be set manually (self-hosted). See

@@ -97,3 +97,36 @@ export function buildUrlSearch({ datasetId, measure, dateFrom, dateTo, filters, 
   const s = q.toString();
   return s ? `?${s}` : "";
 }
+
+// ------------------------------------------------------------ targets ---
+
+export const TARGET_STATUS = {
+  met: "Target met", on_track: "On track", at_risk: "At risk", off_track: "Off track",
+  missed: "Missed", not_started: "Not started", broken: "Can't evaluate",
+};
+
+const sameFilters = (a = {}, b = {}) => {
+  const ka = Object.keys(a);
+  return ka.length === Object.keys(b).length && ka.every((k) => String(a[k]) === String(b[k]));
+};
+
+/**
+ * The target that applies to what a slice shows: same measure, same segment,
+ * and either the slice's own period or, for an undated slice, the current one.
+ */
+export function targetFor(targets, { measure, filters = {}, date_from, date_to }) {
+  const mine = (targets || []).filter((t) => t.measure === measure && sameFilters(t.filters, filters));
+  if (date_from || date_to) {
+    return mine.find((t) => t.from?.startsWith(date_from || "") && date_to && t.to?.startsWith(date_to.slice(0, 7))) || null;
+  }
+  return mine.find((t) => t.current) || null;
+}
+
+/** The current period's label at a grain, from the dataset's last date. */
+export function currentPeriod(lastDate, grain) {
+  if (!lastDate) return null;
+  const [y, m] = lastDate.slice(0, 10).split("-").map(Number);
+  if (grain === "year") return String(y);
+  if (grain === "quarter") return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
+  return `${y}-${String(m).padStart(2, "0")}`;
+}

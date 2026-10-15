@@ -39,7 +39,7 @@ _KNOWN_WORKSPACE_TABLES = (
     "datasets", "dataset_columns", "chunks", "chunk_embeddings", "audit_log",
     "ingest_batches", "row_archive", "data_sources", "dashboard_views",
     "share_links", "alerts", "metrics", "subscriptions", "dataset_relations",
-    "rls_rules", "column_policies", "users",
+    "rls_rules", "column_policies", "targets", "users",
 )
 
 
@@ -170,6 +170,8 @@ def erase_member(con, workspace_id: str, user_id: str) -> dict:
     con.execute("UPDATE share_links SET created_by = NULL WHERE workspace_id = ? AND created_by = ?",
                 [workspace_id, user_id])
     con.execute("UPDATE alerts SET created_by = NULL WHERE workspace_id = ? AND created_by = ?",
+                [workspace_id, user_id])
+    con.execute("UPDATE targets SET created_by = NULL WHERE workspace_id = ? AND created_by = ?",
                 [workspace_id, user_id])
     con.execute("UPDATE audit_log SET user_id = 'erased' WHERE workspace_id = ? AND user_id = ?",
                 [workspace_id, user_id])

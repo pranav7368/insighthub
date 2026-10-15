@@ -85,8 +85,29 @@ export const getDashboard = (id, params) =>
 
 export const ask = (question) => client.post("/ask", { question }).then((r) => r.data);
 
-export const queryData = (datasetId, question) =>
-  client.post(`/datasets/${datasetId}/query`, { question }).then((r) => r.data);
+// `context` pins the question to a drilled slice: {filters, date_from, date_to}
+export const queryData = (datasetId, question, context) =>
+  client.post(`/datasets/${datasetId}/query`, context ? { question, context } : { question }).then((r) => r.data);
+
+// --- Targets, recommended actions, metric tree ---
+export const getTargets = (datasetId) =>
+  client.get(`/datasets/${datasetId}/targets`).then((r) => r.data);
+
+export const setTarget = (datasetId, body) =>
+  client.post(`/datasets/${datasetId}/targets`, body).then((r) => r.data);
+
+export const deleteTarget = (targetId) => client.delete(`/targets/${targetId}`).then((r) => r.data);
+
+export const getActions = (datasetId, { measure, filters } = {}) =>
+  client.get(`/datasets/${datasetId}/actions`, {
+    params: {
+      measure: measure || undefined,
+      filters: filters && Object.keys(filters).length ? JSON.stringify(filters) : undefined,
+    },
+  }).then((r) => r.data);
+
+export const getMetricExplain = (metricId) =>
+  client.get(`/metrics/${metricId}/explain`).then((r) => r.data);
 
 export const getScatter = (datasetId, params) =>
   client.get(`/datasets/${datasetId}/scatter`, { params }).then((r) => r.data);

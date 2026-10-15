@@ -128,6 +128,9 @@ def _periods(con, sl, grain: str, compare: str) -> dict:
             raise DrillError("comparing needs a start date")
     else:
         b0, b1 = latest_period(data_end, grain)
+    # B is exactly one period at this grain: its history is a like-for-like
+    # series, which is what makes "is this change unusual?" answerable
+    aligned = latest_period(b0, grain) == (b0, b1)
 
     a0, a1 = shift_period(b0, b1, compare)
     like_for_like = False
@@ -140,7 +143,61 @@ def _periods(con, sl, grain: str, compare: str) -> dict:
         a1 = min(a1, a0 + timedelta(days=days))
         like_for_like = True
     return {"a": (a0, a1), "b": (b0, b1), "like_for_like": like_for_like,
-            "data_end": data_end.isoformat()}
+            "data_end": data_end.isoformat(), "aligned": aligned}
+
+
+# ------------------------------------------------------- significance ---
+
+MIN_HISTORY = 5
+_STEP_MONTHS = {"month": 1, "quarter": 3, "year": 12}
+
+
+def _next_period(d: date, grain: str) -> date:
+    if grain == "day":
+        return d + timedelta(days=1)
+    if grain == "week":
+        return d + timedelta(days=7)
+    return _add_months(d, _STEP_MONTHS[grain])
+
+
+def _significance(con, sl, measure, agg, grain, per) -> dict | None:
+    """Is the latest period-over-period change bigger than this series
+    usually moves? Each earlier period is measured over the same window (the
+    first N days when B is partial), so the changes being compared are like
+    for like. Returns None when there is too little history to say."""
+    if not per["aligned"]:
+        return None
+    b0, b1 = per["b"]
+    dq = safe_identifier(sl.date_col, sl.allowed)
+    ts = f"TRY_CAST({dq} AS TIMESTAMP)"
+    trunc = f"date_trunc('{grain}', {ts})"          # grain is one of the fixed GRAINS
+    val = "1" if agg == "count" else safe_identifier(measure, sl.allowed)
+    window = (b1 - b0).days + 1 if per["like_for_like"] else 400
+    _, b_end = _date_bounds(None, b1.isoformat())
+    where, params, _ = sl.where(f"{ts} IS NOT NULL AND {ts} < ? AND date_diff('day', {trunc}, {ts}) < ?",
+                                dates=False)
+    rows = con.execute(f"SELECT CAST({trunc} AS DATE) AS p, SUM({val}) FROM {sl.relation} {where} "
+                       f"GROUP BY 1 ORDER BY 1", params + [b_end, window]).fetchall()
+    if not rows:
+        return None
+    found = {r[0]: float(r[1] or 0) for r in rows}
+    # a period with no rows is a real zero, not a gap to skip over
+    values, d = [], rows[0][0]
+    while d <= b0:
+        values.append(found.get(d, 0.0))
+        d = _next_period(d, grain)
+    deltas = [values[i] - values[i - 1] for i in range(1, len(values))]
+    if len(deltas) < MIN_HISTORY + 1:
+        return None
+    latest, history = deltas[-1], deltas[:-1]
+    mean = sum(history) / len(history)
+    std = (sum((x - mean) ** 2 for x in history) / (len(history) - 1)) ** 0.5
+    if std == 0:
+        return None
+    z = (latest - mean) / std
+    level = "unusual" if abs(z) >= 2.5 else "notable" if abs(z) >= 1.5 else "normal"
+    return {"level": level, "z": z, "typical_change": std, "mean_change": mean,
+            "history": len(history), "window_days": window if per["like_for_like"] else None}
 
 
 # --------------------------------------------------------- variance ------
@@ -248,6 +305,9 @@ def explain_variance(con, workspace_id, dataset_id, *, measure=None, agg="sum", 
         "steps": steps, "other": other,
         "members": split["members"] if split else 0,
         "filters": sl.filters,
+        # only meaningful against the previous period; a year-ago gap has no
+        # series of comparable changes behind it
+        "significance": _significance(con, sl, measure, agg, grain, per) if compare == "previous" else None,
     }
     result["summary"] = _summary(result)
     if per["like_for_like"]:

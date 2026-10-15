@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getExplain, getScatter, listMetrics, listViews, updateView } from "../api";
+import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getExplain, getScatter, getTargets, listMetrics, listViews, updateView } from "../api";
 import { exportPdf, exportPng } from "../export";
 import KpiCard from "./KpiCard";
 import CorrelationHeatmap from "./CorrelationHeatmap";
@@ -24,9 +24,10 @@ import ViewsBar from "./ViewsBar";
 import DashSection from "./DashSection";
 import Inspector from "./Inspector";
 import DecompositionTree from "./DecompositionTree";
+import ActionsPanel from "./ActionsPanel";
 import { mappableFraction } from "../geo";
 import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections";
-import { buildUrlSearch, makeCtx, readUrlState } from "../drill";
+import { buildUrlSearch, makeCtx, readUrlState, targetFor } from "../drill";
 
 // stable JSON for comparing a live config against a saved one (dirty check).
 // hidden_sections is a set (sorted), section_order is a sequence (kept as-is).
@@ -49,7 +50,7 @@ function initialFromUrl(datasetId) {
   return owns ? s : null;
 }
 
-export default function DashboardView({ datasetId }) {
+export default function DashboardView({ datasetId, canEdit = false }) {
   const [fromUrl] = useState(() => initialFromUrl(datasetId));
   const [dashboard, setDashboard] = useState(null);
   const [activeMeasure, setActiveMeasure] = useState(fromUrl?.measure || null);
@@ -61,6 +62,8 @@ export default function DashboardView({ datasetId }) {
   // (a drill step the back button can undo), "replace" edits in place, and
   // "skip" means the change came FROM the URL (back / forward)
   const navMode = useRef("replace");
+  const [targets, setTargets] = useState([]);
+  const [targetsVersion, setTargetsVersion] = useState(0);
   const returnFocus = useRef(null);
   const [error, setError] = useState(null);
   const [pair, setPair] = useState(null);            // user-chosen scatter pair
@@ -161,6 +164,11 @@ export default function DashboardView({ datasetId }) {
       .catch(() => setViews([]));
     listMetrics(datasetId).then(setMetrics).catch(() => setMetrics([]));
   }, [datasetId]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    getTargets(datasetId).then(setTargets).catch(() => setTargets([]));
+  }, [datasetId, targetsVersion]);
+  const targetsChanged = () => setTargetsVersion((v) => v + 1);
 
   // state -> URL
   useEffect(() => {
@@ -305,12 +313,20 @@ export default function DashboardView({ datasetId }) {
         <div className="kpi-row">
           {dashboard.kpis.map((kpi) => (
             <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
+              target={targetFor(targets, { measure: kpi.column, filters, date_from: dateFrom, date_to: dateTo })}
               onSelect={() => { setActiveMeasure(kpi.column); openInspect({ measure: kpi.column }); }} />
           ))}
         </div>
       ),
     },
-    { key: "metrics", node: metrics.length > 0 && <CertifiedMetrics metrics={metrics} /> },
+    {
+      key: "actions",
+      node: measure && (
+        <ActionsPanel datasetId={datasetId} measure={measure} filters={filters}
+          refreshKey={targetsVersion} onOpen={(evidence) => openInspect(evidence)} />
+      ),
+    },
+    { key: "metrics", node: metrics.length > 0 && <CertifiedMetrics metrics={metrics} onInspect={openInspect} /> },
     {
       key: "drivers",
       // "what changed" compares the whole dataset's latest two months, so its
@@ -490,7 +506,8 @@ export default function DashboardView({ datasetId }) {
 
       {inspectCtx && (
         <Inspector datasetId={datasetId} ctx={inspectCtx}
-          onNavigate={navigateInspect} onClose={closeInspect} onApply={applyInspect} />
+          onNavigate={navigateInspect} onClose={closeInspect} onApply={applyInspect}
+          targets={targets} canEdit={canEdit} onTargetsChanged={targetsChanged} />
       )}
     </div>
   );

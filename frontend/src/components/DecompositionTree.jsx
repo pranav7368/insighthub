@@ -140,6 +140,12 @@ export default function DecompositionTree({ datasetId, measure, subtype, filters
               </div>
               <div className="insp-caption">{root.a.label}: {formatNumber(root.a.value, subtype)}</div>
               {root.like_for_like && <div className="insp-caption">like-for-like days</div>}
+              {root.significance && (
+                <span className={`signif__badge signif--${root.significance.level}`}
+                  title={`${Math.abs(root.significance.z).toFixed(1)}× the typical month-to-month swing`}>
+                  {root.significance.level === "normal" ? "Normal move" : root.significance.level === "notable" ? "Notable move" : "Unusual move"}
+                </span>
+              )}
             </div>
             {levels.map((l, i) => (
               <Column key={`${i}-${JSON.stringify(sliceAt(i).filters)}`} datasetId={datasetId} slice={sliceAt(i)} level={l}

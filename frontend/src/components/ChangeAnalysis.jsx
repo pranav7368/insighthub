@@ -22,6 +22,27 @@ function useFetch(fn, key) {
   return state;
 }
 
+/** "Is this change real or noise?" — the latest move against how much the
+ *  series usually moves from one period to the next. */
+export function Significance({ sig, grain, subtype }) {
+  const times = `${Math.abs(sig.z).toFixed(1)}×`;
+  const typical = `±${formatNumber(sig.typical_change, subtype)}`;
+  const text = {
+    normal: `Within normal variation — this typically moves ${typical} from one ${grain} to the next.`,
+    notable: `A notable move: ${times} the typical ${grain}-to-${grain} swing of ${typical}.`,
+    unusual: `Unusual: ${times} the typical ${grain}-to-${grain} swing of ${typical}. Find the cause before acting on it.`,
+  }[sig.level];
+  return (
+    <p className={`signif signif--${sig.level}`}>
+      <span className="signif__badge">{sig.level === "normal" ? "Normal" : sig.level === "notable" ? "Notable" : "Unusual"}</span>
+      {text}
+      <span className="signif__basis">
+        {" "}Based on {sig.history} earlier changes{sig.window_days ? `, each over the first ${sig.window_days} days` : ""}.
+      </span>
+    </p>
+  );
+}
+
 function PriceVolumeMix({ datasetId, ctx, measures }) {
   const [volume, setVolume] = useState(null);
   const [dimension, setDimension] = useState(null);
@@ -150,6 +171,7 @@ export default function ChangeAnalysis({ datasetId, ctx, go, measures }) {
           </span>
           {data.summary}
         </p>
+        {data.significance && <Significance sig={data.significance} grain={data.grain} subtype={sub} />}
         {data.note && <p className="insp-caption">{data.note}</p>}
       </section>
 
