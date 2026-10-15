@@ -8,23 +8,20 @@ later ones assume it.
 
 ## Phase 1 — Land the work (today, ~30 min)
 
-The branch `feat/templates-arrange-onboarding` has 20 commits and is pushed.
-**CI has never run** — the workflow triggers on pull requests and on pushes to
-`main`, and this branch has neither. Opening the PR is what first exercises it.
+PR #2 (`feat/drill-inspector`) carries the pro-analyst layer: drill into any
+number, "why it changed", targets, recommended actions, the right-click menu
+and Ctrl/⌘ K. All five CI jobs are green, including the backend against a real
+Postgres (which is what proves migration `0009_targets` on that backend).
 
-- [ ] **Open the PR.**
-      https://github.com/pranav7368/insighthub/pull/new/feat/templates-arrange-onboarding
-- [ ] **Watch the five CI jobs.** Backend (with a real Postgres), grounding
-      benchmark, frontend, dependency audit, Docker build.
-- [ ] **Expect something to fail.** It has never run. The likely candidates,
-      all of which pass locally and are unproven on a clean runner:
-      - the Postgres job runs the two tests that *skip* on your machine;
-      - `npm ci` on a clean checkout;
-      - the two Docker image builds.
-- [ ] **Read the benchmark output** in the job log — correctness, grounding and
-      abstention are printed. That is the number worth watching release to
-      release.
-- [ ] **Merge.**
+- [ ] **Read the one behaviour change before merging:** clicking a bar or a
+      slice now opens its details instead of filtering the dashboard. The
+      panel's "Show this on the dashboard" does the filtering. If your users
+      are used to click-to-filter, say so in the release note.
+- [ ] **Skim the PR description** — it lists every new endpoint and what each
+      commit does, so the review can go commit by commit.
+- [ ] **Read the benchmark output** in the CI log — correctness, grounding and
+      abstention. That is the number worth watching release to release.
+- [ ] **Merge** https://github.com/pranav7368/insighthub/pull/2
 
 ---
 
@@ -45,6 +42,17 @@ not the same thing, and this is the cheapest bug-finding you will ever do.
       region that does not exist, something ambiguous. It should refuse.
 - [ ] Arrange the dashboard, save a view, share a link, open the link in a
       private window.
+- [ ] **Drill all the way down once:** click a KPI → a contributor → another
+      contributor → a month on its trend → Records. Then press the browser's
+      back button and check it walks back up one level at a time. Copy the URL
+      into a private window: it should reopen the same drill.
+- [ ] Open **Why it changed** on a number that dropped. Do the waterfall steps
+      add up to the change? Does the significance label match your gut?
+- [ ] **Set a target** for this month and watch the KPI card show its pace.
+      Check the projection by hand (actual ÷ days so far × days in month).
+- [ ] Read the **Recommended actions** and open the evidence for each. Is any
+      of them something you would *not* act on? That is a rule to tune.
+- [ ] Right-click a bar; press Ctrl/⌘ K and type a region or product name.
 - [ ] Write down every irritation. That list is your real roadmap — better than
       anything in `STRATEGY.md`, because it comes from use.
 

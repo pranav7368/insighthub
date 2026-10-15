@@ -7,8 +7,10 @@
 
 export const SECTIONS = [
   ["kpis", "KPI cards"],
+  ["actions", "Recommended actions"],
   ["metrics", "Certified metrics"],
   ["drivers", "What changed"],
+  ["tree", "Decomposition tree"],
   ["growth", "Growth strip"],
   ["insights", "Key insights"],
   ["narrative", "AI narrative"],

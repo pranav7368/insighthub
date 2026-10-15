@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getExplain, getScatter, listMetrics, listViews, updateView } from "../api";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getExplain, getScatter, getTargets, listMetrics, listViews, updateView } from "../api";
 import { exportPdf, exportPng } from "../export";
 import KpiCard from "./KpiCard";
 import CorrelationHeatmap from "./CorrelationHeatmap";
@@ -22,8 +22,20 @@ import CertifiedMetrics from "./CertifiedMetrics";
 import DriverAnalysis from "./DriverAnalysis";
 import ViewsBar from "./ViewsBar";
 import DashSection from "./DashSection";
+import DecompositionTree from "./DecompositionTree";
+import ActionsPanel from "./ActionsPanel";
+import DataMenu from "./DataMenu";
 import { mappableFraction } from "../geo";
 import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections";
+import { buildUrlSearch, makeCtx, readUrlState, targetFor } from "../drill";
+import { buildCommands } from "../palette";
+import { humanLabel } from "../format";
+
+// opened on demand, so their code is fetched on first use
+const Inspector = lazy(() => import("./Inspector"));
+const CommandPalette = lazy(() => import("./CommandPalette"));
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
 
 // stable JSON for comparing a live config against a saved one (dirty check).
 // hidden_sections is a set (sorted), section_order is a sequence (kept as-is).
@@ -37,12 +49,33 @@ const canonConfig = (c) =>
     section_order: [...(c.section_order || [])],
   });
 
-export default function DashboardView({ datasetId }) {
+// A URL that names this dataset owns the initial state (a shared or
+// bookmarked drill); otherwise the saved default view does.
+function initialFromUrl(datasetId) {
+  const s = readUrlState(window.location.search);
+  if (s.datasetId !== datasetId) return null;
+  const owns = s.measure || s.inspect || s.dateFrom || s.dateTo || Object.keys(s.filters).length;
+  return owns ? s : null;
+}
+
+export default function DashboardView({ datasetId, canEdit = false, onRequestAlert }) {
+  const [fromUrl] = useState(() => initialFromUrl(datasetId));
   const [dashboard, setDashboard] = useState(null);
-  const [activeMeasure, setActiveMeasure] = useState(null);
-  const [filters, setFilters] = useState({});
-  const [dateFrom, setDateFrom] = useState();
-  const [dateTo, setDateTo] = useState();
+  const [activeMeasure, setActiveMeasure] = useState(fromUrl?.measure || null);
+  const [filters, setFilters] = useState(fromUrl?.filters || {});
+  const [dateFrom, setDateFrom] = useState(fromUrl?.dateFrom);
+  const [dateTo, setDateTo] = useState(fromUrl?.dateTo);
+  const [inspectCtx, setInspectCtx] = useState(fromUrl?.inspect || null);
+  // how the next state change reaches the URL: "push" adds a history entry
+  // (a drill step the back button can undo), "replace" edits in place, and
+  // "skip" means the change came FROM the URL (back / forward)
+  const navMode = useRef("replace");
+  const [targets, setTargets] = useState([]);
+  const [targetsVersion, setTargetsVersion] = useState(0);
+  const returnFocus = useRef(null);
+  const [menu, setMenu] = useState(null);                 // right-click menu on a data point
+  const [paletteOpen, setPaletteOpen] = useState(false);  // Ctrl/⌘ K
+  const closeMenu = useCallback(() => setMenu(null), []);
   const [error, setError] = useState(null);
   const [pair, setPair] = useState(null);            // user-chosen scatter pair
   const [customScatter, setCustomScatter] = useState(null);
@@ -131,17 +164,49 @@ export default function DashboardView({ datasetId }) {
     }
   };
 
+  // The component is keyed by dataset, so this runs once per dataset.
   useEffect(() => {
-    setActiveMeasure(null); setFilters({}); setDateFrom(undefined); setDateTo(undefined); setPair(null);
-    setHiddenSections([]); setSectionOrder([]); setArranging(false); setActiveViewId(null);
     listViews(datasetId)
       .then((vs) => {
         setViews(vs);
         const def = vs.find((v) => v.is_default);
-        if (def) applyView(def);   // auto-apply the saved default view
+        if (def && !fromUrl) applyView(def);   // auto-apply the saved default view
       })
       .catch(() => setViews([]));
     listMetrics(datasetId).then(setMetrics).catch(() => setMetrics([]));
+  }, [datasetId]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    getTargets(datasetId).then(setTargets).catch(() => setTargets([]));
+  }, [datasetId, targetsVersion]);
+  const targetsChanged = () => setTargetsVersion((v) => v + 1);
+
+  // state -> URL
+  useEffect(() => {
+    const mode = navMode.current;
+    navMode.current = "replace";
+    if (mode === "skip") return;
+    const search = buildUrlSearch({ datasetId, measure: activeMeasure, dateFrom, dateTo, filters, inspect: inspectCtx });
+    if (search === window.location.search) return;
+    const url = window.location.pathname + search + window.location.hash;
+    if (mode === "push") window.history.pushState(null, "", url);
+    else window.history.replaceState(null, "", url);
+  }, [datasetId, activeMeasure, dateFrom, dateTo, filters, inspectCtx]);
+
+  // URL -> state (back / forward)
+  useEffect(() => {
+    const onPop = () => {
+      const s = readUrlState(window.location.search);
+      if (s.datasetId && s.datasetId !== datasetId) return;   // App switches the dataset
+      navMode.current = "skip";
+      setFilters(s.filters);
+      setDateFrom(s.dateFrom);
+      setDateTo(s.dateTo);
+      if (s.measure) setActiveMeasure(s.measure);
+      setInspectCtx(s.inspect);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
   }, [datasetId]);
 
   // Esc leaves arrange mode — the usual way out of a transient editing mode
@@ -151,6 +216,22 @@ export default function DashboardView({ datasetId }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [arranging]);
+
+  // Ctrl/⌘ K (or "/" outside a text field) opens the command palette
+  useEffect(() => {
+    const onKey = (e) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || "") || e.target?.isContentEditable;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      } else if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // when the user clicks a heatmap cell, fetch that pair (respecting filters)
   useEffect(() => {
@@ -185,16 +266,6 @@ export default function DashboardView({ datasetId }) {
       .catch(() => setExplainData(null));
   }, [datasetId, activeMeasure]);
 
-  // click a bar/slice -> toggle that dimension=value filter -> whole dashboard recomputes
-  const toggleFilter = (dim, value) => {
-    if (value == null) return;
-    setFilters((prev) => {
-      const next = { ...prev };
-      if (next[dim] === value) delete next[dim];
-      else next[dim] = value;
-      return next;
-    });
-  };
   const removeFilter = (dim) =>
     setFilters((prev) => {
       const next = { ...prev };
@@ -203,7 +274,19 @@ export default function DashboardView({ datasetId }) {
     });
 
   if (error) return <div className="empty-panel">{error}</div>;
-  if (!dashboard) return <div className="empty-panel">Loading…</div>;
+  if (!dashboard) {
+    // the shape of the page while it loads, so nothing jumps when it arrives
+    return (
+      <div className="dash-layout" aria-busy="true" aria-label="Loading the dashboard">
+        <div className="dash-content">
+          <div className="skeleton skeleton--title" />
+          <div className="kpi-row">{[0, 1, 2].map((i) => <div key={i} className="skeleton skeleton--kpi" />)}</div>
+          <div className="skeleton skeleton--chart" />
+          <div className="chart-grid"><div className="skeleton skeleton--chart" /><div className="skeleton skeleton--chart" /></div>
+        </div>
+      </div>
+    );
+  }
 
   const subtypeOf = (m) => dashboard.kpis.find((k) => k.column === m)?.subtype;
   const measure = activeMeasure || dashboard.chosen_measure;
@@ -215,6 +298,72 @@ export default function DashboardView({ datasetId }) {
   );
 
   const activeFilterCount = Object.keys(filters).length + (dateFrom ? 1 : 0);
+
+  // ---- drill-down: every number opens in the inspector ----
+  // The slice starts from what the dashboard shows (its filters, dates and
+  // measure); `partial` says which part of it was clicked.
+  const openInspect = (partial = {}) => {
+    if (!inspectCtx) returnFocus.current = document.activeElement;
+    navMode.current = "push";
+    setInspectCtx(makeCtx({ measure, filters, date_from: dateFrom || null, date_to: dateTo || null, ...partial }));
+  };
+  const inspectValue = (dim, value) => {
+    if (value == null) return;
+    openInspect({ filters: { ...filters, [dim]: String(value) } });
+  };
+  const inspectAll = (dim) => openInspect({ tab: "breakdown", dimension: dim });
+  const navigateInspect = (next, { replace } = {}) => {
+    navMode.current = replace ? "replace" : "push";
+    setInspectCtx(next);
+  };
+  const closeInspect = () => {
+    navMode.current = "push";
+    setInspectCtx(null);
+    const el = returnFocus.current;
+    if (el && document.contains(el)) setTimeout(() => el.focus(), 0);
+  };
+  // "show this on the dashboard": the drilled slice becomes the dashboard's own
+  const applyInspect = (c) => {
+    navMode.current = "push";
+    setFilters({ ...c.filters });
+    setDateFrom(c.date_from || undefined);
+    setDateTo(c.date_to || undefined);
+    if (c.measure) setActiveMeasure(c.measure);
+    setInspectCtx(null);
+  };
+  const investigate = (drill) => openInspect({
+    measure: drill.measure || measure,
+    filters: { ...filters, ...(drill.filters || {}) },
+    ...(drill.period ? { date_from: drill.period, date_to: drill.period } : {}),
+    ...(drill.dimension ? { tab: "breakdown", dimension: drill.dimension } : {}),
+  });
+
+  // ---- right-click: every way into the number under the pointer ----
+  const pointAt = (e) => {
+    if (e.clientX || e.clientY) return { x: e.clientX, y: e.clientY };
+    // keyboard (Menu key / Shift+F10): anchor to the element instead
+    const r = e.currentTarget?.getBoundingClientRect?.();
+    return r ? { x: r.left + 12, y: r.bottom - 8 } : { x: 40, y: 40 };
+  };
+  const sliceMenu = (e, partial, title) => {
+    const open = (extra) => () => openInspect({ ...partial, ...extra });
+    const items = [
+      { label: "Open details", hint: "trend · spread · parts", run: open({}) },
+      ...(dashboard.date_column ? [{ label: "Why did it change?", hint: "waterfall", run: open({ tab: "change" }) }] : []),
+      { label: "Break it down", run: open({ tab: "breakdown" }) },
+      { label: "See the rows", run: open({ tab: "records" }) },
+      { label: "Ask about it", run: open({ tab: "ask" }) },
+    ];
+    if (partial.filters || partial.date_from) {
+      items.push({
+        label: "Filter the dashboard to this",
+        run: () => applyInspect(makeCtx({ measure, filters, date_from: dateFrom || null, date_to: dateTo || null, ...partial })),
+      });
+    }
+    setMenu({ ...pointAt(e), title, items });
+  };
+  const segmentMenu = (e, dim, value) =>
+    sliceMenu(e, { filters: { ...filters, [dim]: String(value) } }, `${humanLabel(dim)}: ${value}`);
 
   // Every section, in its natural order. A null node means "this dataset has
   // nothing to show here" — those drop out entirely so arrange mode never
@@ -230,15 +379,42 @@ export default function DashboardView({ datasetId }) {
         <div className="kpi-row">
           {dashboard.kpis.map((kpi) => (
             <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
-              onSelect={() => setActiveMeasure(kpi.column)} />
+              target={targetFor(targets, { measure: kpi.column, filters, date_from: dateFrom, date_to: dateTo })}
+              onSelect={() => { setActiveMeasure(kpi.column); openInspect({ measure: kpi.column }); }}
+              onContext={(e) => sliceMenu(e, { measure: kpi.column }, humanLabel(kpi.column))} />
           ))}
         </div>
       ),
     },
-    { key: "metrics", node: metrics.length > 0 && <CertifiedMetrics metrics={metrics} /> },
-    { key: "drivers", node: <DriverAnalysis explain={explainData} /> },
+    {
+      key: "actions",
+      node: measure && (
+        <ActionsPanel datasetId={datasetId} measure={measure} filters={filters}
+          refreshKey={targetsVersion} onOpen={(evidence) => openInspect(evidence)} />
+      ),
+    },
+    { key: "metrics", node: metrics.length > 0 && <CertifiedMetrics metrics={metrics} onInspect={openInspect} /> },
+    {
+      key: "drivers",
+      // "what changed" compares the whole dataset's latest two months, so its
+      // drill is that month alone — not the dashboard's filters
+      node: <DriverAnalysis explain={explainData} onSelect={(dim, name, ex) => openInspect({
+        measure: ex.measure, filters: { [dim]: String(name) },
+        date_from: ex.current_period, date_to: ex.current_period,
+      })} onContext={(e, dim, name, ex) => sliceMenu(e, {
+        measure: ex.measure, filters: { [dim]: String(name) },
+        date_from: ex.current_period, date_to: ex.current_period,
+      }, `${humanLabel(dim)}: ${name} · ${ex.current_period}`)} />,
+    },
+    {
+      key: "tree",
+      node: measure && dashboard.date_column && (
+        <DecompositionTree datasetId={datasetId} measure={measure} subtype={subtypeOf(measure)}
+          filters={filters} dateFrom={dateFrom} dateTo={dateTo} onInspect={openInspect} />
+      ),
+    },
     { key: "growth", node: <GrowthStrip growth={dashboard.growth} measure={measure} /> },
-    { key: "insights", node: <InsightsPanel insights={dashboard.insights} /> },
+    { key: "insights", node: <InsightsPanel insights={dashboard.insights} onInvestigate={investigate} /> },
     { key: "narrative", node: <AiNarrative datasetId={datasetId} /> },
     {
       key: "forecast",
@@ -247,6 +423,8 @@ export default function DashboardView({ datasetId }) {
           measure={measure} subtype={subtypeOf(measure)}
           forecast={dashboard.forecasts?.[measure]}
           anomalies={dashboard.anomalies?.[measure]}
+          onPeriod={(period) => openInspect({ date_from: period, date_to: period })}
+          onContext={(e, period) => sliceMenu(e, { date_from: period, date_to: period }, `${humanLabel(measure)} · ${period}`)}
         />
       ),
     },
@@ -257,11 +435,12 @@ export default function DashboardView({ datasetId }) {
           {Object.entries(dashboard.breakdowns).map(([dim, bd]) => (
             <BreakdownChart key={dim} dimensionName={dim} breakdown={bd}
               measure={measure} subtype={subtypeOf(measure)}
-              onSelect={toggleFilter} activeValue={filters[dim]} />
+              onSelect={inspectValue} onShowAll={inspectAll} onContext={segmentMenu} activeValue={filters[dim]} />
           ))}
           {Object.entries(dashboard.breakdowns).slice(0, 1).map(([dim, bd]) => (
             <ContributionDonut key={`donut-${dim}`} dimensionName={dim} breakdown={bd}
-              subtype={subtypeOf(measure)} onSelect={toggleFilter} activeValue={filters[dim]} />
+              subtype={subtypeOf(measure)} onSelect={inspectValue} onShowAll={inspectAll} onContext={segmentMenu}
+              activeValue={filters[dim]} />
           ))}
         </div>
       ),
@@ -276,7 +455,7 @@ export default function DashboardView({ datasetId }) {
     {
       key: "pareto",
       node: dashboard.pareto && dashboard.pareto.total_categories > 2 && (
-        <ParetoChart pareto={dashboard.pareto} />
+        <ParetoChart pareto={dashboard.pareto} onSelect={inspectValue} />
       ),
     },
     {
@@ -319,8 +498,21 @@ export default function DashboardView({ datasetId }) {
   );
   const visibleKeys = visible.map((s) => s.key);
 
+  const commands = paletteOpen ? buildCommands({
+    dashboard, views, visibleSections: visibleKeys, filters,
+    on: {
+      inspect: openInspect,
+      applyView,
+      scrollTo: (key) => document.getElementById(`section-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      clearFilters: () => { setFilters({}); setDateFrom(undefined); setDateTo(undefined); },
+      setDates: (from, to) => { setDateFrom(from); setDateTo(to); },
+      exportFile: (kind) => (kind === "csv" ? exportDatasetCsv(datasetId, dashboard.dataset?.name) : runExport(kind)),
+      arrange: () => setArranging(true),
+    },
+  }) : [];
+
   return (
-    <div className="dash-layout">
+    <div className={`dash-layout${inspectCtx ? " has-inspector" : ""}`}>
       <div className={`filter-panel${filtersOpen ? " filter-panel--open" : ""}`}>
         <FilterBar
           filterOptions={dashboard.filter_options}
@@ -345,6 +537,10 @@ export default function DashboardView({ datasetId }) {
             <span className="dash-topline__rows">{dashboard.row_count_filtered?.toLocaleString("en-IN")} rows</span>
           </div>
           <div className="dash-topline__actions" data-tour="views">
+            <button className="palette-btn no-export" onClick={() => setPaletteOpen(true)}
+              aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} title="Find any number, segment or action">
+              <span aria-hidden>⌕</span> Search <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
+            </button>
             <ViewsBar
               views={views} activeViewId={activeViewId} dirty={viewDirty}
               hiddenSections={hiddenSections} arranging={arranging}
@@ -396,6 +592,16 @@ export default function DashboardView({ datasetId }) {
           </DashSection>
         ))}
       </div>
+
+      <Suspense fallback={inspectCtx ? <aside className="inspector"><div className="skeleton skeleton--hero" /></aside> : null}>
+      {inspectCtx && (
+        <Inspector datasetId={datasetId} ctx={inspectCtx}
+          onNavigate={navigateInspect} onClose={closeInspect} onApply={applyInspect}
+          targets={targets} canEdit={canEdit} onTargetsChanged={targetsChanged} onRequestAlert={onRequestAlert} />
+      )}
+      {menu && <DataMenu {...menu} onClose={closeMenu} />}
+      {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
+      </Suspense>
     </div>
   );
 }

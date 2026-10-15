@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import {
   Area, CartesianGrid, ComposedChart, Line, ReferenceDot,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -10,15 +11,24 @@ function ChartTooltip({ active, payload, label, subtype }) {
   const projected = payload.find((p) => p.dataKey === "projected" && p.value != null);
   const row = actual || projected;
   if (!row) return null;
+  const prev = row.payload.prev;
+  const pct = actual && prev ? ((actual.value - prev) / Math.abs(prev)) * 100 : null;
   return (
     <div className="chart-tooltip">
       <div className="chart-tooltip__label">{label}{projected && !actual ? " · projected" : ""}</div>
       <div className="chart-tooltip__value">{formatNumber(row.value, subtype)}</div>
+      {pct != null && (
+        <div className={`chart-tooltip__cmp delta--${pct >= 0 ? "up" : "down"}`}>
+          {pct >= 0 ? "▲" : "▼"} {Math.abs(pct).toFixed(1)}% vs previous month
+        </div>
+      )}
+      {actual && <div className="chart-tooltip__hint">click for details · right-click for more</div>}
     </div>
   );
 }
 
-export default function ForecastChart({ measure, subtype, forecast, anomalies }) {
+export default function ForecastChart({ measure, subtype, forecast, anomalies, onPeriod, onContext }) {
+  const hovered = useRef(null);
   if (!forecast?.history?.length) {
     return <div className="empty-panel">No time series for this measure (a date column is required).</div>;
   }
@@ -27,7 +37,7 @@ export default function ForecastChart({ measure, subtype, forecast, anomalies })
   const ma = forecast.moving_avg || [];
 
   const data = [
-    ...history.map((h, i) => ({ period: h.period, actual: h.value, ma: ma[i] ?? null })),
+    ...history.map((h, i) => ({ period: h.period, actual: h.value, ma: ma[i] ?? null, prev: i > 0 ? history[i - 1].value : null })),
     ...proj.map((f) => ({ period: f.period, projected: f.value, band: [f.lower, f.upper] })),
   ];
   // bridge the projection line to the last real point
@@ -37,13 +47,29 @@ export default function ForecastChart({ measure, subtype, forecast, anomalies })
   const anomalyByPeriod = Object.fromEntries((anomalies || []).map((a) => [a.period, a]));
 
   return (
-    <div className="chart-card">
+    <div className="chart-card" onContextMenu={(e) => {
+      if (!onContext || !hovered.current) return;
+      e.preventDefault();
+      onContext(e, hovered.current);
+    }}>
       <div className="chart-card__title">
         {humanLabel(measure)} — trend & forecast
-        {proj.length > 0 && <span className="chart-card__tag">next {proj.length}mo · {forecast.method.replace("+", " + ")}</span>}
+        {proj.length > 0 && <span className="chart-card__tag">next {proj.length}mo · {forecast.label || forecast.method}</span>}
+        {onPeriod && <span className="chart-card__tag">click a month for details</span>}
       </div>
       <ResponsiveContainer width="100%" height={300}>
-        <ComposedChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
+        <ComposedChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
+          style={onPeriod ? { cursor: "pointer" } : undefined}
+          onMouseMove={(s) => {
+            const r = data[Number(s?.activeIndex ?? s?.activeTooltipIndex)];
+            hovered.current = r && r.actual != null ? r.period : null;
+          }}
+          onMouseLeave={() => { hovered.current = null; }}
+          onClick={(s) => {
+            // only real months drill — a projected point has no rows behind it
+            const row = data[Number(s?.activeIndex ?? s?.activeTooltipIndex)];
+            if (onPeriod && row && row.actual != null) onPeriod(row.period);
+          }}>
           <CartesianGrid stroke="var(--gridline)" vertical={false} />
           <XAxis dataKey="period" stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} minTickGap={20} />
           <YAxis stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} axisLine={false}
@@ -68,6 +94,14 @@ export default function ForecastChart({ measure, subtype, forecast, anomalies })
         <span><i className="lg lg--madash" /> 3-mo avg</span>
         {(anomalies || []).length > 0 && <span><i className="lg lg--dot" /> Anomaly</span>}
       </div>
+      {forecast.accuracy && (
+        <p className="forecast-accuracy">
+          Model chosen by testing {forecast.accuracy.candidates.length} standard models against what actually
+          happened over the last {forecast.accuracy.months} months; this one ({forecast.label}) was off by
+          {forecast.accuracy.mape != null ? ` ${forecast.accuracy.mape}% ` : " "}on average
+          {" "}(±{formatNumber(forecast.accuracy.mae, subtype)}). The shaded range comes from those real misses.
+        </p>
+      )}
     </div>
   );
 }

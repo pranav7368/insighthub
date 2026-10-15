@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { formatNumber, humanLabel } from "../format";
 
@@ -5,12 +6,15 @@ import { formatNumber, humanLabel } from "../format";
 // fold into a neutral "Other" slice (never cycle beyond the validated set).
 const COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--text-muted)"];
 
-export default function ContributionDonut({ dimensionName, breakdown, subtype, onSelect, activeValue }) {
+export default function ContributionDonut({ dimensionName, breakdown, subtype, onSelect, onShowAll, onContext, activeValue }) {
+  const hovered = useRef(null);
   const raw = breakdown?.data ?? [];
   if (raw.length < 2) return null;
   const top = raw.slice(0, 3);
-  const otherValue = raw.slice(3).reduce((s, d) => s + (d.value || 0), 0);
-  const otherShare = raw.slice(3).reduce((s, d) => s + (d.share_pct || 0), 0);
+  // the tail beyond the top 20 the dashboard returns belongs in "Other" too
+  const tail = breakdown?.others;
+  const otherValue = raw.slice(3).reduce((s, d) => s + (d.value || 0), 0) + (tail?.value || 0);
+  const otherShare = raw.slice(3).reduce((s, d) => s + (d.share_pct || 0), 0) + (tail?.share_pct || 0);
   const data = [...top.map((d) => ({ name: d.name, value: d.value, share: d.share_pct }))];
   if (otherValue > 0) data.push({ name: "Other", value: otherValue, share: Math.round(otherShare * 10) / 10 });
 
@@ -20,16 +24,26 @@ export default function ContributionDonut({ dimensionName, breakdown, subtype, o
   };
 
   return (
-    <div className="chart-card">
+    <div className="chart-card" onContextMenu={(e) => {
+      if (!onContext || !hovered.current || hovered.current === "Other") return;
+      e.preventDefault();
+      onContext(e, dimensionName, hovered.current);
+    }}>
       <div className="chart-card__title">
         Contribution by {humanLabel(dimensionName)}
-        <span className="chart-card__tag">click a slice to filter</span>
+        <span className="chart-card__tag">click a slice for details</span>
       </div>
       <ResponsiveContainer width="100%" height={240}>
         <PieChart>
           <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={90}
             paddingAngle={2} stroke="var(--surface-1)" strokeWidth={2} cursor="pointer"
-            onClick={(slice) => onSelect && slice?.name && slice.name !== "Other" && onSelect(dimensionName, slice.name)}>
+            onMouseEnter={(slice) => { hovered.current = slice?.name ?? null; }}
+            onMouseLeave={() => { hovered.current = null; }}
+            onClick={(slice) => {
+              if (!slice?.name) return;
+              if (slice.name === "Other") onShowAll?.(dimensionName);
+              else onSelect?.(dimensionName, slice.name);
+            }}>
             {data.map((d, i) => <Cell key={i} fill={sliceColor(d.name, i)} />)}
           </Pie>
           <Tooltip content={({ active, payload }) =>

@@ -115,6 +115,7 @@ def compute_dashboard(
     date_to: str | None = None,
     breakdown_measure: str | None = None,
     user_id: str | None = None,
+    public: bool = False,
 ) -> dict:
     """`user_id` is the member the numbers are computed *for*: their row-level
     rules narrow every query below. None means unrestricted — correct for
@@ -128,7 +129,7 @@ def compute_dashboard(
 
     columns = get_columns(con, workspace_id, dataset_id)
     allowed = {c.name for c in columns}                    # the injection whitelist
-    table, rls_params = secured_relation(con, workspace_id, user_id, dataset)
+    table, rls_params = secured_relation(con, workspace_id, user_id, dataset, public=public)
 
     measures = [c for c in columns if c.role == "measure"]
     dimensions = [c for c in columns if c.role == "dimension"]
@@ -221,17 +222,28 @@ def compute_dashboard(
         for dim in dimensions:
             dcol = safe_identifier(dim.name, allowed)
             dwhere, dparams = build_where(f"{dcol} IS NOT NULL")
+            # the window totals are computed over every group before the
+            # LIMIT, so one query yields the top 20 *and* the whole they are
+            # shares of — a long tail must not inflate every share shown
             sql = f"""
-                SELECT {dcol} AS name, SUM({mcol}) AS value
-                FROM {table} {dwhere}
-                GROUP BY 1 ORDER BY value DESC NULLS LAST LIMIT 20
+                SELECT name, value, SUM(value) OVER () AS grand, COUNT(*) OVER () AS distinct_n
+                FROM (SELECT {dcol} AS name, SUM({mcol}) AS value FROM {table} {dwhere} GROUP BY 1)
+                ORDER BY value DESC NULLS LAST LIMIT 20
             """
-            rows = con.execute(sql, dparams).fetchall()
-            total = sum((r[1] or 0) for r in rows) or 1
+            full = con.execute(sql, dparams).fetchall()
+            rows = [(r[0], r[1]) for r in full]
+            grand, distinct = (full[0][2], full[0][3]) if full else (None, 0)
+            total = grand or sum((r[1] or 0) for r in rows) or 1
+            others = None
+            if distinct > len(rows):
+                rest = (grand or 0) - sum((r[1] or 0) for r in rows)
+                others = {"count": distinct - len(rows), "value": rest,
+                          "share_pct": round(rest / total * 100, 1)}
             breakdowns[dim.name] = {
                 "subtype": dim.subtype, "measure": chosen,
                 "data": [{"name": r[0], "value": r[1],
                           "share_pct": round((r[1] or 0) / total * 100, 1)} for r in rows],
+                "others": others,
             }
 
     # ---- Distributions: five-number summary per measure ----

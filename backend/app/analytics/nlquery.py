@@ -24,7 +24,8 @@ from string import Template
 from ..core import config
 from ..core.sqlsafe import quote_identifier, safe_identifier, safe_table_name
 from ..qa.llm import LLM, extract_json, get_llm
-from .engine import DatasetNotFound, get_columns, get_dataset
+from .engine import DatasetNotFound, _date_bounds, get_columns, get_dataset
+from .drill import DrillError, _check_date
 from .intelligence import format_value
 
 AGGREGATIONS = {"sum", "avg", "min", "max", "count"}
@@ -173,7 +174,8 @@ def _display_sql(sql: str, table_quoted: str, dataset_name: str, params: list) -
 
 
 def execute_intent(con, workspace_id: str, dataset_id: str, intent: QueryIntent,
-                   user_id: str | None = None) -> dict:
+                   user_id: str | None = None, date_from: str | None = None,
+                   date_to: str | None = None) -> dict:
     from .rls import secured_relation
 
     schema = build_schema(con, workspace_id, dataset_id, user_id)
@@ -200,6 +202,15 @@ def execute_intent(con, workspace_id: str, dataset_id: str, intent: QueryIntent,
     for col, val in intent.filters.items():
         where.append(f"{safe_identifier(col, allowed)} = ?")
         params.append(val)
+    if (date_from or date_to) and date_col:
+        lo, hi = _date_bounds(date_from, date_to)
+        dts = f"TRY_CAST({safe_identifier(date_col, allowed)} AS TIMESTAMP)"
+        if lo:
+            where.append(f"{dts} >= ?")
+            params.append(lo)
+        if hi:
+            where.append(f"{dts} < ?")
+            params.append(hi)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
 
     readable = _describe(intent, schema)
@@ -295,10 +306,30 @@ def summarize(result: dict, intent: QueryIntent) -> str:
 
 
 def answer_data_question(con, workspace_id: str, dataset_id: str, question: str,
-                         llm: LLM | None = None, user_id: str | None = None) -> dict:
+                         llm: LLM | None = None, user_id: str | None = None,
+                         context: dict | None = None) -> dict:
+    """`context` pins the question to a drilled slice ({"filters": {...},
+    "date_from": ..., "date_to": ...}): asked from inside "Region: North",
+    "revenue by product" means North's revenue by product. A filter the
+    question names itself wins over the context's."""
     schema = build_schema(con, workspace_id, dataset_id, user_id)
     intent = question_to_intent(question, schema, llm=llm)
-    result = execute_intent(con, workspace_id, dataset_id, intent, user_id)
+    date_from = date_to = None
+    if context:
+        pinned = context.get("filters") or {}
+        if not isinstance(pinned, dict) or any(c not in schema["allowed"] for c in pinned):
+            raise QueryError("the context names a column this dataset does not have")
+        intent.filters = {**{k: str(v) for k, v in pinned.items()}, **intent.filters}
+        date_from, date_to = context.get("date_from"), context.get("date_to")
+        for bound in (date_from, date_to):
+            if bound is not None:
+                try:
+                    _check_date(bound)
+                except DrillError as exc:
+                    raise QueryError(str(exc))
+    result = execute_intent(con, workspace_id, dataset_id, intent, user_id, date_from, date_to)
+    if date_from or date_to:
+        result["query"] += f" ({date_from or '…'} to {date_to or '…'})"
     result["answer"] = summarize(result, intent)
     result["question"] = question
     return result

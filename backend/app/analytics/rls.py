@@ -174,7 +174,8 @@ def _is_admin(con, workspace_id: str, user_id: str | None) -> bool:
     return bool(row) and row[0] == "admin"
 
 
-def secured_relation(con, workspace_id: str, user_id: str | None, dataset: dict) -> tuple[str, list]:
+def secured_relation(con, workspace_id: str, user_id: str | None, dataset: dict,
+                     *, public: bool = False) -> tuple[str, list]:
     """The relation every read path should SELECT FROM, plus its bound params.
 
     Use this in place of `safe_table_name(dataset["table_name"])`; the returned
@@ -184,13 +185,18 @@ def secured_relation(con, workspace_id: str, user_id: str | None, dataset: dict)
     It applies BOTH protections, so a caller gets them together or not at all:
     row-level rules become the WHERE, and PII masking becomes a REPLACE over
     the projection.
+
+    `public=True` is for anonymous readers (share links). Rows are still
+    scoped by the link author's rules, but masking is ALWAYS applied: the
+    admin exemption is for a signed-in admin looking at their own data, not
+    for whoever an admin's link reaches.
     """
     table = safe_table_name(dataset["table_name"])
     dataset_id = dataset["dataset_id"]
     where, params = build_predicate(con, workspace_id, user_id, dataset_id)
 
     projection = ""
-    if not _is_admin(con, workspace_id, user_id):
+    if public or not _is_admin(con, workspace_id, user_id):
         allowed = {c.name for c in get_columns(con, workspace_id, dataset_id)}
         projection = mask_projection(con, workspace_id, dataset_id, allowed)
 

@@ -1,25 +1,30 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { getSchema, listDatasets, overrideColumn, uploadDataset } from "./api";
 import Login from "./components/Login";
 import UploadButton from "./components/UploadButton";
-import ConnectSource from "./components/ConnectSource";
 import TemplateGallery from "./components/TemplateGallery";
-import AccessDialog from "./components/AccessDialog";
-import SecurityDialog from "./components/SecurityDialog";
-import ShareDialog from "./components/ShareDialog";
-import AlertsDialog from "./components/AlertsDialog";
-import MetricsDialog from "./components/MetricsDialog";
-import JoinDialog from "./components/JoinDialog";
-import TeamDialog from "./components/TeamDialog";
-import BillingDialog from "./components/BillingDialog";
-import SchemaReview from "./components/SchemaReview";
-import DataQuality from "./components/DataQuality";
-import UpdateData from "./components/UpdateData";
 import DashboardView from "./components/DashboardView";
-import ComparePane from "./components/ComparePane";
-import AskView from "./components/AskView";
 import TourOverlay from "./components/TourOverlay";
 import { TOUR_KEY, TOUR_STEPS } from "./tour";
+import { readUrlState } from "./drill";
+
+// Loaded on first use: most sessions never open a dialog, Ask or Compare, so
+// their code stays out of the first download.
+const ConnectSource = lazy(() => import("./components/ConnectSource"));
+const AccessDialog = lazy(() => import("./components/AccessDialog"));
+const SecurityDialog = lazy(() => import("./components/SecurityDialog"));
+const ShareDialog = lazy(() => import("./components/ShareDialog"));
+const AlertsDialog = lazy(() => import("./components/AlertsDialog"));
+const ReportsDialog = lazy(() => import("./components/ReportsDialog"));
+const MetricsDialog = lazy(() => import("./components/MetricsDialog"));
+const JoinDialog = lazy(() => import("./components/JoinDialog"));
+const TeamDialog = lazy(() => import("./components/TeamDialog"));
+const BillingDialog = lazy(() => import("./components/BillingDialog"));
+const SchemaReview = lazy(() => import("./components/SchemaReview"));
+const DataQuality = lazy(() => import("./components/DataQuality"));
+const UpdateData = lazy(() => import("./components/UpdateData"));
+const ComparePane = lazy(() => import("./components/ComparePane"));
+const AskView = lazy(() => import("./components/AskView"));
 
 function useTheme() {
   const [theme, setTheme] = useState(() => localStorage.getItem("ih_theme") || "auto");
@@ -48,6 +53,8 @@ export default function App() {
   const [showSecurity, setShowSecurity] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
+  const [showReports, setShowReports] = useState(false);
+  const [alertPreset, setAlertPreset] = useState(null);   // e.g. "alert me if this target falls behind"
   const [showMetrics, setShowMetrics] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
@@ -79,10 +86,31 @@ export default function App() {
   useEffect(() => {
     if (!authed) return;
     refresh().then((list) => {
-      const structured = list.find((d) => d.kind === "structured");
+      // a shared / bookmarked link names its dataset; otherwise take the first
+      const wanted = readUrlState(window.location.search).datasetId;
+      const structured = list.find((d) => d.kind === "structured" && d.dataset_id === wanted)
+        || list.find((d) => d.kind === "structured");
       if (structured) setDatasetId(structured.dataset_id);
     });
   }, [authed, refresh]);
+
+  // back / forward across a dataset switch
+  useEffect(() => {
+    const onPop = () => {
+      const id = readUrlState(window.location.search).datasetId;
+      if (id && id !== datasetId && datasets.some((d) => d.dataset_id === id)) {
+        setDatasetId(id);
+        setTab("dashboard");
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [datasetId, datasets]);
+
+  const chooseDataset = (id) => {
+    window.history.pushState(null, "", `${window.location.pathname}?ds=${encodeURIComponent(id)}`);
+    setDatasetId(id);
+  };
 
   const handleUpload = async (file) => {
     const result = await uploadDataset(file);
@@ -170,7 +198,7 @@ export default function App() {
       {(tab === "dashboard" || tab === "compare") && structuredDatasets.length > 0 && (
         <div className="toolbar">
           <select className="dataset-select" aria-label="Choose dataset"
-            value={datasetId ?? ""} onChange={(e) => setDatasetId(e.target.value)}>
+            value={datasetId ?? ""} onChange={(e) => chooseDataset(e.target.value)}>
             {structuredDatasets.map((d) => (
               <option key={d.dataset_id} value={d.dataset_id}>{d.name} ({d.row_count} rows)</option>
             ))}
@@ -185,6 +213,7 @@ export default function App() {
                 )}
                 <button role="menuitem" onClick={runFromMenu(() => setShowShare(true))}>Share dashboard</button>
                 <button role="menuitem" onClick={runFromMenu(() => setShowAlerts(true))}>Alerts</button>
+                <button role="menuitem" onClick={runFromMenu(() => setShowReports(true))}>Email reports</button>
                 {isAdmin && (
                   <button role="menuitem" onClick={runFromMenu(() => setShowAccess(true))}>Access &amp; privacy</button>
                 )}
@@ -219,13 +248,17 @@ export default function App() {
               )}
             </div>
           ) : (
-            datasetId && <DashboardView key={`${datasetId}-${dashboardKey}`} datasetId={datasetId} />
+            datasetId && <DashboardView key={`${datasetId}-${dashboardKey}`} datasetId={datasetId} canEdit={canEdit}
+              onRequestAlert={(preset) => { setAlertPreset(preset); setShowAlerts(true); }} />
           )
         )}
-        {tab === "compare" && datasetId && <ComparePane key={datasetId} datasetId={datasetId} />}
-        {tab === "ask" && <AskView datasetId={datasetId} hasStructured={structuredDatasets.length > 0} />}
+        <Suspense fallback={<div className="empty-panel">Loading…</div>}>
+          {tab === "compare" && datasetId && <ComparePane key={datasetId} datasetId={datasetId} />}
+          {tab === "ask" && <AskView datasetId={datasetId} hasStructured={structuredDatasets.length > 0} />}
+        </Suspense>
       </main>
 
+      <Suspense fallback={null}>
       {showConnect && (
         <ConnectSource
           onClose={() => setShowConnect(false)}
@@ -242,8 +275,10 @@ export default function App() {
       {showShare && datasetId && (
         <ShareDialog datasetId={datasetId} onClose={() => setShowShare(false)} />
       )}
+      {showReports && datasetId && <ReportsDialog datasetId={datasetId} onClose={() => setShowReports(false)} />}
       {showAlerts && datasetId && (
-        <AlertsDialog datasetId={datasetId} onClose={() => setShowAlerts(false)} />
+        <AlertsDialog datasetId={datasetId} preset={alertPreset}
+          onClose={() => { setShowAlerts(false); setAlertPreset(null); }} />
       )}
       {showMetrics && datasetId && (
         <MetricsDialog
@@ -293,6 +328,7 @@ export default function App() {
           onChanged={() => { refresh(); setDashboardKey((k) => k + 1); }}
         />
       )}
+      </Suspense>
       {tourOn && <TourOverlay steps={TOUR_STEPS} onFinish={endTour} />}
     </div>
   );

@@ -39,7 +39,7 @@ _KNOWN_WORKSPACE_TABLES = (
     "datasets", "dataset_columns", "chunks", "chunk_embeddings", "audit_log",
     "ingest_batches", "row_archive", "data_sources", "dashboard_views",
     "share_links", "alerts", "metrics", "subscriptions", "dataset_relations",
-    "rls_rules", "column_policies", "users",
+    "rls_rules", "column_policies", "targets", "report_schedules", "users",
 )
 
 
@@ -171,6 +171,19 @@ def erase_member(con, workspace_id: str, user_id: str) -> dict:
                 [workspace_id, user_id])
     con.execute("UPDATE alerts SET created_by = NULL WHERE workspace_id = ? AND created_by = ?",
                 [workspace_id, user_id])
+    con.execute("UPDATE targets SET created_by = NULL WHERE workspace_id = ? AND created_by = ?",
+                [workspace_id, user_id])
+    con.execute("UPDATE report_schedules SET created_by = NULL WHERE workspace_id = ? AND created_by = ?",
+                [workspace_id, user_id])
+    # an erased member's address must not keep receiving reports
+    email = con.execute("SELECT lower(email) FROM users WHERE user_id = ? AND workspace_id = ?",
+                        [user_id, workspace_id]).fetchone()[0]
+    for report_id, recipients in con.execute(
+            "SELECT report_id, recipients FROM report_schedules WHERE workspace_id = ?", [workspace_id]).fetchall():
+        current = json.loads(recipients or "[]")
+        if email in current:
+            con.execute("UPDATE report_schedules SET recipients = ? WHERE report_id = ? AND workspace_id = ?",
+                        [json.dumps([r for r in current if r != email]), report_id, workspace_id])
     con.execute("UPDATE audit_log SET user_id = 'erased' WHERE workspace_id = ? AND user_id = ?",
                 [workspace_id, user_id])
     con.execute("DELETE FROM users WHERE user_id = ? AND workspace_id = ?", [user_id, workspace_id])

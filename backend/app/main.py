@@ -24,7 +24,7 @@ from .analytics.views import (
     ViewError, ViewNotFound, create_view, delete_view, list_views, update_view,
 )
 from .analytics.sharing import (
-    ShareError, ShareNotFound, create_share, list_shares,
+    ShareError, ShareNotFound, create_share, list_shares, scope_to_share,
     resolve_share_dashboard_config, revoke_share,
 )
 from .analytics.alerts import (
@@ -32,9 +32,23 @@ from .analytics.alerts import (
     run_due_alerts, send_test, set_enabled,
 )
 from .analytics.semantic import (
-    MetricError, create_metric, delete_metric, list_metrics,
+    MetricError, MetricNotFound, create_metric, delete_metric, list_metrics,
 )
 from .analytics.drivers import DriverError, explain_change
+from .analytics.drill import (
+    DrillError, breakdown as drill_breakdown, inspect as drill_inspect, parse_filters,
+    records as drill_records, records_csv as drill_records_csv,
+)
+from .analytics.variance import explain_variance, price_volume_mix
+from .analytics.actions import recommend
+from .analytics.reports import (
+    ReportError, ReportNotFound, build_report, create_report, delete_report, email_configured,
+    list_reports, run_due_reports, send_report, set_report_enabled,
+)
+from .analytics.metrictree import explain_metric
+from .analytics.targets import (
+    TargetError, delete_target, evaluate as evaluate_target, list_targets, set_target,
+)
 from .analytics.rls import (
     RuleError, RuleNotFound, create_rule, delete_rule, list_rules, secured_relation,
 )
@@ -107,6 +121,10 @@ def _run_scheduled_work() -> None:
             pass
     try:
         run_due_alerts(con)  # each alert isolates its own errors
+    except Exception:
+        pass
+    try:
+        run_due_reports(con)  # each report isolates its own errors
     except Exception:
         pass
     try:
@@ -1127,13 +1145,71 @@ def public_dashboard(token: str):
             date_from=cfg.get("date_from"), date_to=cfg.get("date_to"),
             breakdown_measure=cfg.get("measure"),
             user_id=author_id,          # a link shows only what its author could see
+            public=True,                # ...and anonymous readers always get masked PII
         )
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="this dashboard is no longer available")
     return {"dashboard": dash, "meta": {
         "hidden_sections": cfg.get("hidden_sections", []),
         "section_order": cfg.get("section_order", []),
+        "date_limited": bool(cfg.get("date_from") or cfg.get("date_to")),
     }}
+
+
+# Drill-down on a share link: aggregates only. Raw rows, CSV export, Ask,
+# targets and actions stay behind sign-in. Every request is evaluated as the
+# link's author (their row rules), always masked, and clamped to the link's
+# own filters and dates — a visitor can narrow what was shared, never widen it.
+
+def _public_drill(fn, token: str, filters: str | None, date_from, date_to, **kwargs):
+    con = db.connect()
+    try:
+        workspace_id, dataset_id, cfg, author_id = resolve_share_dashboard_config(con, token)
+    except ShareNotFound:
+        raise HTTPException(status_code=404, detail="this link is invalid or has expired")
+    try:
+        scoped, date_from, date_to = scope_to_share(cfg, parse_filters(filters), date_from, date_to)
+    except (ShareError, DrillError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        return fn(con, workspace_id, dataset_id, filters=scoped, date_from=date_from, date_to=date_to,
+                  user_id=author_id, public=True, **kwargs)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="this dashboard is no longer available")
+    except (DrillError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/public/{token}/inspect")
+def public_inspect(token: str, measure: str | None = None, agg: str = "sum", filters: str | None = None,
+                   date_from: str | None = None, date_to: str | None = None, grain: str = "month"):
+    return _public_drill(drill_inspect, token, filters, date_from, date_to,
+                         measure=measure, agg=agg, grain=grain)
+
+
+@app.get("/api/public/{token}/breakdown")
+def public_breakdown(token: str, dimension: str, measure: str | None = None, agg: str = "sum",
+                     filters: str | None = None, date_from: str | None = None, date_to: str | None = None,
+                     limit: int = 50):
+    return _public_drill(drill_breakdown, token, filters, date_from, date_to,
+                         dimension=dimension, measure=measure, agg=agg, limit=limit)
+
+
+@app.get("/api/public/{token}/variance")
+def public_variance(token: str, measure: str | None = None, agg: str = "sum", filters: str | None = None,
+                    date_from: str | None = None, date_to: str | None = None, grain: str = "month",
+                    compare: str = "previous", dimension: str | None = None, limit: int = 8):
+    con = db.connect()
+    try:
+        _, _, cfg, _ = resolve_share_dashboard_config(con, token)
+    except ShareNotFound:
+        raise HTTPException(status_code=404, detail="this link is invalid or has expired")
+    if cfg.get("date_from") or cfg.get("date_to"):
+        # comparing with the previous period would read rows outside the dates
+        # the author chose to share
+        raise HTTPException(status_code=400, detail="change analysis is not available on a date-limited link")
+    return _public_drill(explain_variance, token, filters, date_from, date_to, measure=measure, agg=agg,
+                         grain=grain, compare=compare, dimension=dimension, limit=limit)
 
 
 # ------------------------------------------------- threshold alerts ------
@@ -1292,6 +1368,254 @@ def explain(dataset_id: str, request: Request, principal: Principal = Depends(ge
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+# ------------------------------------------------------ drill-down -------
+# A "slice" is measure + aggregation + filters (one JSON object) + date range.
+# Every number on the dashboard can be opened as a slice and taken apart.
+
+def _drill(fn, dataset_id: str, principal: Principal, **kwargs):
+    con = db.connect()
+    try:
+        return fn(con, principal.workspace_id, dataset_id, user_id=principal.user_id, **kwargs)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except (DrillError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/datasets/{dataset_id}/inspect")
+def inspect_slice(dataset_id: str, measure: str | None = None, agg: str = "sum",
+                  filters: str | None = None, date_from: str | None = None,
+                  date_to: str | None = None, grain: str = "month",
+                  principal: Principal = Depends(get_principal)):
+    """One number, fully explained: value, formula, SQL, spread, trend at any
+    grain, previous-period and year-ago comparison, top contributors."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(drill_inspect, dataset_id, principal, measure=measure, agg=agg, filters=parsed,
+                  date_from=date_from, date_to=date_to, grain=grain)
+
+
+@app.get("/api/datasets/{dataset_id}/breakdown")
+def breakdown_slice(dataset_id: str, dimension: str, measure: str | None = None,
+                    agg: str = "sum", filters: str | None = None,
+                    date_from: str | None = None, date_to: str | None = None, limit: int = 50,
+                    principal: Principal = Depends(get_principal)):
+    """A slice split by one dimension, fully ranked, with the tail as 'other'."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(drill_breakdown, dataset_id, principal, dimension=dimension, measure=measure,
+                  agg=agg, filters=parsed, date_from=date_from, date_to=date_to, limit=limit)
+
+
+@app.get("/api/datasets/{dataset_id}/rows")
+def slice_rows(dataset_id: str, filters: str | None = None, date_from: str | None = None,
+               date_to: str | None = None, sort: str | None = None, desc: bool = True,
+               page: int = 1, page_size: int = 50,
+               principal: Principal = Depends(get_principal)):
+    """The actual records behind a slice, paged and sortable."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(drill_records, dataset_id, principal, filters=parsed, date_from=date_from,
+                  date_to=date_to, sort=sort, desc=desc, page=page, page_size=page_size)
+
+
+@app.get("/api/datasets/{dataset_id}/rows.csv")
+def slice_rows_csv(dataset_id: str, filters: str | None = None, date_from: str | None = None,
+                   date_to: str | None = None, sort: str | None = None, desc: bool = True,
+                   principal: Principal = Depends(get_principal)):
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    csv_text = _drill(drill_records_csv, dataset_id, principal, filters=parsed,
+                      date_from=date_from, date_to=date_to, sort=sort, desc=desc)
+    return Response(content=csv_text, media_type="text/csv",
+                    headers={"Content-Disposition": 'attachment; filename="rows.csv"'})
+
+
+@app.get("/api/datasets/{dataset_id}/variance")
+def variance_slice(dataset_id: str, measure: str | None = None, agg: str = "sum",
+                   filters: str | None = None, date_from: str | None = None,
+                   date_to: str | None = None, grain: str = "month", compare: str = "previous",
+                   dimension: str | None = None, limit: int = 8,
+                   principal: Principal = Depends(get_principal)):
+    """Why a slice moved between two periods: a reconciling waterfall by the
+    dimension that best explains it (or the one asked for)."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(explain_variance, dataset_id, principal, measure=measure, agg=agg, filters=parsed,
+                  date_from=date_from, date_to=date_to, grain=grain, compare=compare,
+                  dimension=dimension, limit=limit)
+
+
+@app.get("/api/datasets/{dataset_id}/pvm")
+def pvm_slice(dataset_id: str, measure: str | None = None, volume: str | None = None,
+              filters: str | None = None, date_from: str | None = None, date_to: str | None = None,
+              grain: str = "month", compare: str = "previous", dimension: str | None = None,
+              limit: int = 8, principal: Principal = Depends(get_principal)):
+    """Price / volume / mix split of a value measure's change."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(price_volume_mix, dataset_id, principal, measure=measure, volume=volume,
+                  filters=parsed, date_from=date_from, date_to=date_to, grain=grain,
+                  compare=compare, dimension=dimension, limit=limit)
+
+
+@app.get("/api/datasets/{dataset_id}/actions")
+def recommended_actions(dataset_id: str, measure: str | None = None, filters: str | None = None,
+                        principal: Principal = Depends(get_principal)):
+    """Rule-based next steps, each with the numbers behind it and the drill
+    slice that reproduces them."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(recommend, dataset_id, principal, measure=measure, filters=parsed)
+
+
+# ------------------------------------------------------ email reports ----
+
+class ReportBody(BaseModel):
+    name: str
+    recipients: list[str] | str
+    frequency: str = "weekly"
+    measure: str | None = None
+
+
+class ReportPatchBody(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/reports/status")
+def reports_status(principal: Principal = Depends(get_principal)):
+    return {"email_configured": email_configured()}
+
+
+@app.get("/api/datasets/{dataset_id}/reports")
+def get_reports(dataset_id: str, principal: Principal = Depends(get_principal)):
+    con = db.connect()
+    try:
+        get_dataset(con, principal.workspace_id, dataset_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    return list_reports(con, principal.workspace_id, dataset_id)
+
+
+@app.post("/api/datasets/{dataset_id}/reports")
+def add_report(dataset_id: str, body: ReportBody, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    try:
+        report = create_report(con, principal.workspace_id, dataset_id, name=body.name,
+                               recipients=body.recipients, frequency=body.frequency,
+                               measure=body.measure, created_by=principal.user_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except ReportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "report_create", report["report_id"])
+    return report
+
+
+@app.get("/api/datasets/{dataset_id}/reports/preview")
+def preview_report(dataset_id: str, measure: str | None = None, principal: Principal = Depends(get_principal)):
+    """What a recipient would get, built now for the asking member — masked, as emailed."""
+    con = db.connect()
+    try:
+        return build_report(con, principal.workspace_id, dataset_id, measure=measure, user_id=principal.user_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except (ReportError, DrillError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.patch("/api/reports/{report_id}")
+def patch_report(report_id: str, body: ReportPatchBody, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    try:
+        return set_report_enabled(con, principal.workspace_id, report_id, body.enabled)
+    except ReportNotFound:
+        raise HTTPException(status_code=404, detail="report not found")
+
+
+@app.post("/api/reports/{report_id}/send")
+def send_report_now(report_id: str, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    try:
+        result = send_report(con, principal.workspace_id, report_id)
+    except ReportNotFound:
+        raise HTTPException(status_code=404, detail="report not found")
+    except ReportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "report_send", report_id)
+    return result
+
+
+@app.delete("/api/reports/{report_id}")
+def remove_report(report_id: str, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    if not delete_report(con, principal.workspace_id, report_id):
+        raise HTTPException(status_code=404, detail="report not found")
+    db.audit(con, principal.workspace_id, principal.user_id, "report_delete", report_id)
+    return {"ok": True}
+
+
+# ------------------------------------------------------------ targets ----
+
+class TargetBody(BaseModel):
+    measure: str
+    grain: str = "month"
+    period: str
+    value: float
+    filters: dict = {}
+
+
+@app.get("/api/datasets/{dataset_id}/targets")
+def get_targets(dataset_id: str, principal: Principal = Depends(get_principal)):
+    """Every target on the dataset, evaluated for the member asking (their row
+    rules apply to the actuals, so a regional viewer sees their region's pace)."""
+    con = db.connect()
+    try:
+        get_dataset(con, principal.workspace_id, dataset_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    return list_targets(con, principal.workspace_id, dataset_id, principal.user_id)
+
+
+@app.post("/api/datasets/{dataset_id}/targets")
+def put_target(dataset_id: str, body: TargetBody, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    try:
+        target = set_target(con, principal.workspace_id, dataset_id, measure=body.measure,
+                            grain=body.grain, period=body.period, value=body.value,
+                            filters=body.filters, user_id=principal.user_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except (TargetError, DrillError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "target_set",
+             f"{body.measure} {body.period} {body.value}")
+    return evaluate_target(con, principal.workspace_id, dataset_id, target, principal.user_id)
+
+
+@app.delete("/api/targets/{target_id}")
+def remove_target(target_id: str, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    if not delete_target(con, principal.workspace_id, target_id):
+        raise HTTPException(status_code=404, detail="target not found")
+    db.audit(con, principal.workspace_id, principal.user_id, "target_delete", target_id)
+    return {"ok": True}
+
+
 # --------------------------------------------- certified metrics ---------
 
 class MetricCreateBody(BaseModel):
@@ -1332,6 +1656,23 @@ def remove_metric(metric_id: str, principal: Principal = Depends(require_editor)
         raise HTTPException(status_code=404, detail="metric not found")
     db.audit(con, principal.workspace_id, principal.user_id, "metric_delete", metric_id)
     return {"ok": True}
+
+
+@app.get("/api/metrics/{metric_id}/explain")
+def metric_explain(metric_id: str, grain: str = "month", compare: str = "previous",
+                   principal: Principal = Depends(get_principal)):
+    """Why a certified metric moved: a ratio split exactly into the effect of
+    its numerator and of its denominator."""
+    con = db.connect()
+    try:
+        return explain_metric(con, principal.workspace_id, metric_id, grain=grain, compare=compare,
+                              user_id=principal.user_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except MetricNotFound:
+        raise HTTPException(status_code=404, detail="metric not found")
+    except (MetricError, DrillError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 # ------------------------------------------------ row-level security -----
@@ -1531,6 +1872,8 @@ def clean_data(dataset_id: str, body: CleanBody, principal: Principal = Depends(
 
 class DataQueryBody(BaseModel):
     question: str
+    # optional drill slice the question is asked from: {filters, date_from, date_to}
+    context: dict | None = None
 
 
 @app.post("/api/datasets/{dataset_id}/query")
@@ -1541,7 +1884,7 @@ def query_data(dataset_id: str, body: DataQueryBody, principal: Principal = Depe
     con = db.connect()
     try:
         result = answer_data_question(con, principal.workspace_id, dataset_id, body.question,
-                                      user_id=principal.user_id)
+                                      user_id=principal.user_id, context=body.context)
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="dataset not found")
     except QueryError as exc:

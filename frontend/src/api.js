@@ -85,8 +85,29 @@ export const getDashboard = (id, params) =>
 
 export const ask = (question) => client.post("/ask", { question }).then((r) => r.data);
 
-export const queryData = (datasetId, question) =>
-  client.post(`/datasets/${datasetId}/query`, { question }).then((r) => r.data);
+// `context` pins the question to a drilled slice: {filters, date_from, date_to}
+export const queryData = (datasetId, question, context) =>
+  client.post(`/datasets/${datasetId}/query`, context ? { question, context } : { question }).then((r) => r.data);
+
+// --- Targets, recommended actions, metric tree ---
+export const getTargets = (datasetId) =>
+  client.get(`/datasets/${datasetId}/targets`).then((r) => r.data);
+
+export const setTarget = (datasetId, body) =>
+  client.post(`/datasets/${datasetId}/targets`, body).then((r) => r.data);
+
+export const deleteTarget = (targetId) => client.delete(`/targets/${targetId}`).then((r) => r.data);
+
+export const getActions = (datasetId, { measure, filters } = {}) =>
+  client.get(`/datasets/${datasetId}/actions`, {
+    params: {
+      measure: measure || undefined,
+      filters: filters && Object.keys(filters).length ? JSON.stringify(filters) : undefined,
+    },
+  }).then((r) => r.data);
+
+export const getMetricExplain = (metricId) =>
+  client.get(`/metrics/${metricId}/explain`).then((r) => r.data);
 
 export const getScatter = (datasetId, params) =>
   client.get(`/datasets/${datasetId}/scatter`, { params }).then((r) => r.data);
@@ -96,6 +117,64 @@ export const getNarrative = (datasetId) =>
 
 export const getExplain = (datasetId, measure) =>
   client.get(`/datasets/${datasetId}/explain`, { params: measure ? { measure } : {} }).then((r) => r.data);
+
+// --- Drill-down: a slice is {measure, agg, filters, date_from, date_to} ---
+// Filters travel as one JSON object so a column named "page" or "sort" can't
+// collide with the endpoint's own parameters.
+const sliceParams = (s) => {
+  const p = {};
+  if (s.filters && Object.keys(s.filters).length) p.filters = JSON.stringify(s.filters);
+  if (s.date_from) p.date_from = s.date_from;
+  if (s.date_to) p.date_to = s.date_to;
+  return p;
+};
+
+export const getInspect = (datasetId, s) =>
+  client.get(`/datasets/${datasetId}/inspect`, {
+    params: { ...sliceParams(s), measure: s.measure || undefined, agg: s.agg || "sum", grain: s.grain || "month" },
+  }).then((r) => r.data);
+
+export const getBreakdown = (datasetId, s, dimension, limit = 50) =>
+  client.get(`/datasets/${datasetId}/breakdown`, {
+    params: { ...sliceParams(s), dimension, limit, measure: s.measure || undefined, agg: s.agg || "sum" },
+  }).then((r) => r.data);
+
+// why a slice moved between two periods (reconciling waterfall)
+export const getVariance = (datasetId, s, { dimension, limit } = {}) =>
+  client.get(`/datasets/${datasetId}/variance`, {
+    params: {
+      ...sliceParams(s), measure: s.measure || undefined, agg: s.agg || "sum", grain: s.grain || "month",
+      compare: s.compare || "previous", dimension: dimension || undefined, limit,
+    },
+  }).then((r) => r.data);
+
+// price / volume / mix split of a value measure's change
+export const getPvm = (datasetId, s, { volume, dimension } = {}) =>
+  client.get(`/datasets/${datasetId}/pvm`, {
+    params: {
+      ...sliceParams(s), measure: s.measure || undefined, grain: s.grain || "month",
+      compare: s.compare || "previous", volume: volume || undefined, dimension: dimension || undefined,
+    },
+  }).then((r) => r.data);
+
+export const getRows = (datasetId, s, { sort, desc = true, page = 1, pageSize = 50 } = {}) =>
+  client.get(`/datasets/${datasetId}/rows`, {
+    params: { ...sliceParams(s), sort: sort || undefined, desc, page, page_size: pageSize },
+  }).then((r) => r.data);
+
+export const exportRowsCsv = (datasetId, s, { sort, desc = true } = {}, name = "rows") =>
+  client.get(`/datasets/${datasetId}/rows.csv`, {
+    params: { ...sliceParams(s), sort: sort || undefined, desc }, responseType: "blob",
+  }).then((r) => {
+    const url = URL.createObjectURL(r.data);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  });
 
 // --- Multi-table joins ---
 export const suggestJoin = (left, right) =>
@@ -169,6 +248,26 @@ export const revokeShare = (token) =>
 // public: no auth required (the token is the capability)
 export const getPublicDashboard = (token) =>
   client.get(`/public/${token}/dashboard`).then((r) => r.data);
+
+// Drill-down on a share link: aggregates only, clamped server-side to what the
+// link shares (its filters and dates), always masked.
+export const getPublicInspect = (token, s) =>
+  client.get(`/public/${token}/inspect`, {
+    params: { ...sliceParams(s), measure: s.measure || undefined, agg: s.agg || "sum", grain: s.grain || "month" },
+  }).then((r) => r.data);
+
+export const getPublicBreakdown = (token, s, dimension, limit = 50) =>
+  client.get(`/public/${token}/breakdown`, {
+    params: { ...sliceParams(s), dimension, limit, measure: s.measure || undefined, agg: s.agg || "sum" },
+  }).then((r) => r.data);
+
+export const getPublicVariance = (token, s, { dimension, limit } = {}) =>
+  client.get(`/public/${token}/variance`, {
+    params: {
+      ...sliceParams(s), measure: s.measure || undefined, agg: s.agg || "sum", grain: s.grain || "month",
+      compare: s.compare || "previous", dimension: dimension || undefined, limit,
+    },
+  }).then((r) => r.data);
 
 // --- Threshold alerts (webhook delivery) ---
 export const listAlerts = (datasetId) =>
@@ -285,3 +384,13 @@ export const startCheckout = (plan) =>
     success_url: `${window.location.origin}/?billing=success`,
     cancel_url: `${window.location.origin}/?billing=cancel`,
   }).then((r) => r.data);
+
+// --- Scheduled email reports ---
+export const getReportsStatus = () => client.get("/reports/status").then((r) => r.data);
+export const listReports = (datasetId) => client.get(`/datasets/${datasetId}/reports`).then((r) => r.data);
+export const createReport = (datasetId, body) => client.post(`/datasets/${datasetId}/reports`, body).then((r) => r.data);
+export const previewReport = (datasetId, measure) =>
+  client.get(`/datasets/${datasetId}/reports/preview`, { params: { measure: measure || undefined } }).then((r) => r.data);
+export const setReportEnabled = (reportId, enabled) => client.patch(`/reports/${reportId}`, { enabled }).then((r) => r.data);
+export const sendReportNow = (reportId) => client.post(`/reports/${reportId}/send`).then((r) => r.data);
+export const deleteReport = (reportId) => client.delete(`/reports/${reportId}`).then((r) => r.data);

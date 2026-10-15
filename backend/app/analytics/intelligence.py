@@ -73,60 +73,44 @@ def _linear_fit(values: np.ndarray):
     return float(intercept), float(slope), fitted, resid_std
 
 
-def _seasonal_additive(values: np.ndarray, fitted: np.ndarray, period: int = 12) -> np.ndarray:
-    """Average detrended deviation per season slot (month-of-year)."""
-    resid = values - fitted
-    seasonal = np.zeros(period)
-    for s in range(period):
-        idx = np.arange(s, len(values), period)
-        if len(idx):
-            seasonal[s] = resid[idx].mean()
-    seasonal -= seasonal.mean()  # keep it zero-sum so it doesn't shift the level
-    return seasonal
-
-
 @dataclass
 class Forecast:
     method: str
     history: list[dict]
     forecast: list[dict]
+    label: str | None = None
+    accuracy: dict | None = None
 
     def as_dict(self):
-        return {"method": self.method, "history": self.history, "forecast": self.forecast}
+        return {"method": self.method, "label": self.label, "history": self.history,
+                "forecast": self.forecast, "accuracy": self.accuracy}
 
 
 def forecast_series(periods: list[str], values: list[float], subtype: str | None,
                     horizon: int = 3, non_negative: bool = True) -> Forecast:
-    """Project a monthly series forward. Linear trend, plus an additive
-    monthly-seasonal component when >= 2 full years are available. 95%
-    prediction band from residual spread, widening with horizon."""
+    """Project a monthly series forward with whichever standard model best
+    predicted this series' own recent past (see analytics/forecasting.py).
+    The 95% band comes from that model's real one-step backtest misses and
+    widens with the square root of the horizon."""
+    from .forecasting import forecast as _forecast
+
     y = np.asarray(values, dtype=float)
-    n = len(y)
     history = [{"period": p, "value": float(v)} for p, v in zip(periods, values)]
-    if n < 4:
+    if len(y) < 4:
         return Forecast(method="insufficient_history", history=history, forecast=[])
 
-    intercept, slope, fitted, resid_std = _linear_fit(y)
-    use_seasonal = n >= 24
-    seasonal = _seasonal_additive(y, fitted, 12) if use_seasonal else None
-    start_month = int(periods[-1].split("-")[1])  # month-of-year of last point
-
-    fut_periods = future_periods(periods[-1], horizon)
+    fit = _forecast(y, horizon)
     out = []
-    for h, p in enumerate(fut_periods, start=1):
-        t = n - 1 + h
-        point = intercept + slope * t
-        if seasonal is not None:
-            point += seasonal[(start_month - 1 + h) % 12]
-        # band widens with the square root of horizon (random-walk-like)
-        band = 1.96 * resid_std * math.sqrt(h)
+    for h, (p, point) in enumerate(zip(future_periods(periods[-1], horizon), fit["points"]), start=1):
+        point = float(point)
+        band = 1.96 * fit["band_sd"] * math.sqrt(h)
         lower, upper = point - band, point + band
         if non_negative:
             point, lower = max(point, 0.0), max(lower, 0.0)
         out.append({"period": p, "value": round(point, 2),
                     "lower": round(lower, 2), "upper": round(max(upper, 0.0), 2)})
-    method = "linear+seasonal" if use_seasonal else "linear"
-    return Forecast(method=method, history=history, forecast=out)
+    return Forecast(method=fit["method"], history=history, forecast=out,
+                    label=fit["label"], accuracy=fit["accuracy"])
 
 
 def moving_average(values: list[float], window: int = 3) -> list[float | None]:
@@ -206,6 +190,8 @@ class Insight:
     title: str
     detail: str
     category: str = "general"
+    # where "investigate" lands: {measure, filters?, period?, dimension?}
+    drill: dict | None = None
 
     def as_dict(self):
         return self.__dict__.copy()
@@ -244,28 +230,37 @@ def build_insights(
             if change >= 5:
                 insights.append(Insight("good", f"{label} is trending up",
                     f"{label} rose {change:+.1f}% from {series[0]['period']} ({fv(pm, first)}) "
-                    f"to {series[-1]['period']} ({fv(pm, last)}).", "trend"))
+                    f"to {series[-1]['period']} ({fv(pm, last)}).", "trend", {"measure": pm}))
             elif change <= -5:
                 insights.append(Insight("warning", f"{label} is trending down",
                     f"{label} fell {change:.1f}% from {series[0]['period']} ({fv(pm, first)}) "
-                    f"to {series[-1]['period']} ({fv(pm, last)}).", "trend"))
+                    f"to {series[-1]['period']} ({fv(pm, last)}).", "trend", {"measure": pm}))
             else:
                 insights.append(Insight("info", f"{label} is broadly flat",
-                    f"{label} moved {change:+.1f}% across the period — no strong trend.", "trend"))
+                    f"{label} moved {change:+.1f}% across the period — no strong trend.", "trend", {"measure": pm}))
         if len(series) >= 2:
             mom = _pct_change(series[-2]["value"], series[-1]["value"])
             if mom is not None and abs(mom) >= 8:
                 sev = "good" if mom > 0 else "warning"
                 insights.append(Insight(sev, f"Latest month {'jumped' if mom > 0 else 'dropped'} {abs(mom):.0f}%",
                     f"{label} went from {fv(pm, series[-2]['value'])} in {series[-2]['period']} "
-                    f"to {fv(pm, series[-1]['value'])} in {series[-1]['period']} ({mom:+.1f}%).", "momentum"))
+                    f"to {fv(pm, series[-1]['value'])} in {series[-1]['period']} ({mom:+.1f}%).", "momentum",
+                    {"measure": pm, "period": series[-1]["period"]}))
         fc = forecasts.get(pm, {}).get("forecast") or []
         if fc:
             nxt = fc[0]
+            acc = forecasts.get(pm, {}).get("accuracy") or {}
+            model = forecasts.get(pm, {}).get("label")
+            track = ""
+            if acc.get("mape") is not None:
+                # say how far the model has actually been off, on this series
+                track = (f" Using {model}, which was off by {acc['mape']:.0f}% on average when tested "
+                         f"against the last {acc['months']} months.")
             insights.append(Insight("info", f"Projected next month: {fv(pm, nxt['value'])}",
-                f"Based on the trend, {label} is projected at {fv(pm, nxt['value'])} in {nxt['period']} "
-                f"(range {fv(pm, nxt['lower'])}–{fv(pm, nxt['upper'])}). This is a model projection, not a guarantee.",
-                "forecast"))
+                f"{label} is projected at {fv(pm, nxt['value'])} in {nxt['period']} "
+                f"(range {fv(pm, nxt['lower'])}–{fv(pm, nxt['upper'])}).{track} "
+                "This is a model projection, not a guarantee.",
+                "forecast", {"measure": pm}))
 
     # ---- concentration risk on the primary breakdown ----
     for dim, bd in breakdowns.items():
@@ -276,7 +271,7 @@ def build_insights(
                 insights.append(Insight("warning", f"High concentration in {top['name']}",
                     f"{top['name']} alone accounts for {top['share_pct']:.0f}% of "
                     f"{_humanize(pm) if pm else 'the total'} across {_humanize(dim)} — a dependency risk.",
-                    "concentration"))
+                    "concentration", {"measure": pm, "filters": {dim: top["name"]}}))
             break  # only the first/primary dimension
 
     # ---- best & fastest-moving segment ----
@@ -287,7 +282,7 @@ def build_insights(
             insights.append(Insight("good", f"Top {_humanize(dim)}: {best['name']}",
                 f"{best['name']} leads {_humanize(dim)} with {fv(pm, best['value'])}"
                 + (f" ({best['share_pct']:.0f}% share)." if best.get('share_pct') is not None else "."),
-                "leader"))
+                "leader", {"measure": pm, "filters": {dim: best["name"]}}))
         break
 
     # ---- anomalies (one callout per period; prefer the primary measure) ----
@@ -300,7 +295,8 @@ def build_insights(
             seen_periods.add(a["period"])
             insights.append(Insight(a["severity"], f"Unusual {a['direction']} in {a['period']}",
                 f"{_humanize(measure)} was {fv(measure, a['value'])} in {a['period']}, "
-                f"vs an expected ~{fv(measure, a['expected'])}. Worth investigating.", "anomaly"))
+                f"vs an expected ~{fv(measure, a['expected'])}. Worth investigating.", "anomaly",
+                {"measure": measure, "period": a["period"]}))
 
     # ---- Pareto (80/20) ----
     if pareto and pareto.get("n_for_80") and pareto.get("total_categories", 0) > pareto["n_for_80"]:
@@ -308,7 +304,8 @@ def build_insights(
         dim = _humanize(pareto.get("dimension", "categories"))
         insights.append(Insight("info", f"Pareto: {n80} of {total} {dim} drive ~80%",
             f"The top {n80} of {total} {dim.lower()} account for about 80% of "
-            f"{_humanize(pm) if pm else 'the total'} — focus effort there.", "pareto"))
+            f"{_humanize(pm) if pm else 'the total'} — focus effort there.", "pareto",
+            {"measure": pm, "dimension": pareto.get("dimension")}))
 
     # ---- margin insight when both revenue & profit exist ----
     names = {m["name"].lower(): m["name"] for m in measures}
@@ -322,7 +319,7 @@ def build_insights(
             sev = "good" if margin >= 15 else "warning" if margin < 8 else "info"
             insights.append(Insight(sev, f"Overall margin: {margin:.1f}%",
                 f"{_humanize(prof)} is {margin:.1f}% of {_humanize(rev)} "
-                f"({fv(prof, prof_total)} on {fv(rev, rev_total)}).", "margin"))
+                f"({fv(prof, prof_total)} on {fv(rev, rev_total)}).", "margin", {"measure": prof}))
 
     # rank: critical > warning > good > info, keep order within
     rank = {"critical": 0, "warning": 1, "good": 2, "info": 3}

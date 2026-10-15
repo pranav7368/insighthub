@@ -89,6 +89,19 @@ ALLOW_PRIVATE_FETCH = os.environ.get("IH_ALLOW_PRIVATE_FETCH", "").lower() in ("
 ENABLE_SCHEDULER = os.environ.get("IH_ENABLE_SCHEDULER", "1").lower() in ("1", "true", "yes")
 SCHEDULER_TICK_SECONDS = int(os.environ.get("IH_SCHEDULER_TICK", "60"))
 
+# Scheduled email reports (analytics/reports.py). No host = email off; sending
+# then fails with a clear message instead of silently doing nothing.
+SMTP_HOST = os.environ.get("IH_SMTP_HOST", "").strip()
+SMTP_PORT = int(os.environ.get("IH_SMTP_PORT", "587"))
+SMTP_USER = os.environ.get("IH_SMTP_USER", "")
+SMTP_PASSWORD = os.environ.get("IH_SMTP_PASSWORD", "")
+SMTP_FROM = os.environ.get("IH_SMTP_FROM", "InsightHub <reports@localhost>")
+SMTP_STARTTLS = os.environ.get("IH_SMTP_STARTTLS", "1").lower() in ("1", "true", "yes")
+SMTP_SSL = os.environ.get("IH_SMTP_SSL", "").lower() in ("1", "true", "yes")
+SMTP_TIMEOUT = int(os.environ.get("IH_SMTP_TIMEOUT", "20"))
+# Public URL of the app, for the "open the dashboard" link in emails (optional).
+APP_URL = os.environ.get("IH_APP_URL", "").strip()
+
 # Column-role detection thresholds (see analytics/detect.py).
 MAX_DIMENSION_CARDINALITY = 40
 MAX_NUMERIC_DIMENSION_CARDINALITY = 12

@@ -6,6 +6,7 @@ const AGGREGATES = [
   { value: "total", label: "Total" },
   { value: "latest", label: "Latest month" },
   { value: "mom_pct", label: "Month-over-month %" },
+  { value: "target_pace", label: "Pace vs current target %" },
 ];
 const OPS = [
   { value: "lt", label: "is below" },
@@ -15,10 +16,15 @@ const OPS = [
 ];
 const STATE_LABEL = { firing: "Firing", ok: "OK", error: "Error", pending: "Waiting for data" };
 
-export default function AlertsDialog({ datasetId, onClose }) {
+// `preset` pre-fills the form, e.g. from a target: {aggregate, measure, op, threshold, name}
+export default function AlertsDialog({ datasetId, onClose, preset }) {
   const [measures, setMeasures] = useState([]);
   const [alerts, setAlerts] = useState([]);
-  const [form, setForm] = useState({ name: "", measure: "", aggregate: "total", op: "lt", threshold: "", webhook_url: "" });
+  const [form, setForm] = useState({
+    name: "", measure: "", aggregate: "total", op: "lt", threshold: "", webhook_url: "",
+    ...(preset || {}),
+    ...(preset?.threshold != null ? { threshold: String(preset.threshold) } : {}),
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [note, setNote] = useState(null);
@@ -108,7 +114,15 @@ export default function AlertsDialog({ datasetId, onClose }) {
               </select>
               <input className="alert-threshold" type="number" step="any" value={form.threshold}
                 placeholder="value" onChange={(e) => set("threshold", e.target.value)} />
+              {form.aggregate === "target_pace" && <span>%</span>}
             </div>
+            {form.aggregate === "target_pace" && (
+              <p className="modal__hint alert-pace-hint">
+                Watches the target that covers today (set one from a number's details). 100% means on course
+                to hit it; “is below 90” fires when the run rate projects missing it by more than 10%, and the
+                message says what the remaining days need.
+              </p>
+            )}
             <div className="src-field src-field--full">
               <label>Webhook URL</label>
               <input value={form.webhook_url} placeholder="https://hooks.slack.com/services/…"
