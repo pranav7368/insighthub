@@ -384,3 +384,13 @@ export const startCheckout = (plan) =>
     success_url: `${window.location.origin}/?billing=success`,
     cancel_url: `${window.location.origin}/?billing=cancel`,
   }).then((r) => r.data);
+
+// --- Scheduled email reports ---
+export const getReportsStatus = () => client.get("/reports/status").then((r) => r.data);
+export const listReports = (datasetId) => client.get(`/datasets/${datasetId}/reports`).then((r) => r.data);
+export const createReport = (datasetId, body) => client.post(`/datasets/${datasetId}/reports`, body).then((r) => r.data);
+export const previewReport = (datasetId, measure) =>
+  client.get(`/datasets/${datasetId}/reports/preview`, { params: { measure: measure || undefined } }).then((r) => r.data);
+export const setReportEnabled = (reportId, enabled) => client.patch(`/reports/${reportId}`, { enabled }).then((r) => r.data);
+export const sendReportNow = (reportId) => client.post(`/reports/${reportId}/send`).then((r) => r.data);
+export const deleteReport = (reportId) => client.delete(`/reports/${reportId}`).then((r) => r.data);

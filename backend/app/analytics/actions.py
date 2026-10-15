@@ -39,8 +39,10 @@ def _pct(x) -> str:
 
 
 def recommend(con, workspace_id, dataset_id, *, measure=None, filters=None, user_id=None,
-              limit=8) -> dict:
-    sl = _open(con, workspace_id, dataset_id, user_id, filters, None, None)
+              limit=8, public=False) -> dict:
+    """`public=True` when the result leaves the app (an emailed report): the
+    numbers are the author's, but any value they name is PII-masked."""
+    sl = _open(con, workspace_id, dataset_id, user_id, filters, None, None, public)
     measure = _resolve_measure(sl, measure, "sum")
     if measure not in sl.measures:
         raise DrillError(f"{measure!r} is not a numeric measure")
@@ -59,7 +61,7 @@ def recommend(con, workspace_id, dataset_id, *, measure=None, filters=None, user
     v = None
     if sl.date_col:
         try:
-            v = explain_variance(con, workspace_id, dataset_id, measure=measure, filters=sl.filters,
+            v = explain_variance(con, workspace_id, dataset_id, measure=measure, filters=sl.filters, public=public,
                                  limit=25, user_id=user_id)
         except DrillError:
             v = None
@@ -116,7 +118,7 @@ def recommend(con, workspace_id, dataset_id, *, measure=None, filters=None, user
     if v and guess_volume_measure(sl.measures, measure):
         checked.append("price_erosion")
         try:
-            p = price_volume_mix(con, workspace_id, dataset_id, measure=measure, filters=sl.filters,
+            p = price_volume_mix(con, workspace_id, dataset_id, measure=measure, filters=sl.filters, public=public,
                                  user_id=user_id)
         except DrillError:
             p = None

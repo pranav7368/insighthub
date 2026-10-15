@@ -235,6 +235,24 @@ CREATE TABLE IF NOT EXISTS metrics (
     created_at   TIMESTAMP DEFAULT current_timestamp
 );
 
+-- Scheduled email reports. Mirrored by migration 0010 for older databases.
+CREATE TABLE IF NOT EXISTS report_schedules (
+    report_id       VARCHAR PRIMARY KEY,
+    workspace_id    VARCHAR NOT NULL,
+    dataset_id      VARCHAR NOT NULL,
+    name            VARCHAR NOT NULL,
+    measure         VARCHAR,
+    recipients      VARCHAR NOT NULL,      -- JSON list of addresses
+    frequency       VARCHAR NOT NULL,      -- daily | weekly | monthly
+    enabled         BOOLEAN DEFAULT true,
+    created_by      VARCHAR,               -- whose row rules scope the report
+    last_sent_at    TIMESTAMP,
+    last_attempt_at TIMESTAMP,
+    last_status     VARCHAR,
+    last_error      VARCHAR,
+    created_at      TIMESTAMP DEFAULT current_timestamp
+);
+
 -- Targets: the value a measure should reach in one period, optionally for one
 -- segment. Mirrored by migration 0009 for databases created before it.
 CREATE TABLE IF NOT EXISTS targets (

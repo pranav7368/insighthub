@@ -15,6 +15,7 @@ const AccessDialog = lazy(() => import("./components/AccessDialog"));
 const SecurityDialog = lazy(() => import("./components/SecurityDialog"));
 const ShareDialog = lazy(() => import("./components/ShareDialog"));
 const AlertsDialog = lazy(() => import("./components/AlertsDialog"));
+const ReportsDialog = lazy(() => import("./components/ReportsDialog"));
 const MetricsDialog = lazy(() => import("./components/MetricsDialog"));
 const JoinDialog = lazy(() => import("./components/JoinDialog"));
 const TeamDialog = lazy(() => import("./components/TeamDialog"));
@@ -52,6 +53,7 @@ export default function App() {
   const [showSecurity, setShowSecurity] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
+  const [showReports, setShowReports] = useState(false);
   const [alertPreset, setAlertPreset] = useState(null);   // e.g. "alert me if this target falls behind"
   const [showMetrics, setShowMetrics] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
@@ -211,6 +213,7 @@ export default function App() {
                 )}
                 <button role="menuitem" onClick={runFromMenu(() => setShowShare(true))}>Share dashboard</button>
                 <button role="menuitem" onClick={runFromMenu(() => setShowAlerts(true))}>Alerts</button>
+                <button role="menuitem" onClick={runFromMenu(() => setShowReports(true))}>Email reports</button>
                 {isAdmin && (
                   <button role="menuitem" onClick={runFromMenu(() => setShowAccess(true))}>Access &amp; privacy</button>
                 )}
@@ -272,6 +275,7 @@ export default function App() {
       {showShare && datasetId && (
         <ShareDialog datasetId={datasetId} onClose={() => setShowShare(false)} />
       )}
+      {showReports && datasetId && <ReportsDialog datasetId={datasetId} onClose={() => setShowReports(false)} />}
       {showAlerts && datasetId && (
         <AlertsDialog datasetId={datasetId} preset={alertPreset}
           onClose={() => { setShowAlerts(false); setAlertPreset(null); }} />

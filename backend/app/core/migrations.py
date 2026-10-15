@@ -175,6 +175,28 @@ MIGRATIONS: tuple[Migration, ...] = (
                )""",
         ),
     ),
+    Migration(
+        id="0010_report_schedules",
+        description="scheduled email reports",
+        # `enabled` carries no DEFAULT here: boolean defaults have broken the
+        # Postgres path before (see _add_bool_column), and it is always written
+        statements=("""CREATE TABLE IF NOT EXISTS report_schedules (
+    report_id       VARCHAR PRIMARY KEY,
+    workspace_id    VARCHAR NOT NULL,
+    dataset_id      VARCHAR NOT NULL,
+    name            VARCHAR NOT NULL,
+    measure         VARCHAR,
+    recipients      VARCHAR NOT NULL,      -- JSON list of addresses
+    frequency       VARCHAR NOT NULL,      -- daily | weekly | monthly
+    enabled         BOOLEAN,
+    created_by      VARCHAR,               -- whose row rules scope the report
+    last_sent_at    TIMESTAMP,
+    last_attempt_at TIMESTAMP,
+    last_status     VARCHAR,
+    last_error      VARCHAR,
+    created_at      TIMESTAMP DEFAULT current_timestamp
+)""",),
+    ),
 )
 
 

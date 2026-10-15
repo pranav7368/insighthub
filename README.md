@@ -37,6 +37,8 @@ Every figure on the dashboard can be opened and traced back to its source:
 - **Change analysis:** a period-over-period change is broken into contributions that sum to the total, compared over matching date ranges when the latest period is incomplete, and labelled by how unusual it is relative to the series' typical variation.
 - **Targets and alerts:** a target can be set for a measure and period; progress is projected from the current run rate, and an optional webhook alert fires when that projection falls below a chosen threshold.
 - **Recommended actions:** rule-based prompts (for example, a declining segment or a dependency on a single value) are shown with the figures behind them and a link to the supporting data.
+- **Forecasts:** several standard models (trend, exponential smoothing, seasonal) are tested against the series' own recent history, the most accurate is used, and its measured error is shown with the projection.
+- **Sharing and reports:** a read-only share link lets a viewer explore aggregates within what was shared; scheduled email reports summarise the latest change, targets and recommended actions. Both are always PII-masked and never include raw rows. Email delivery needs SMTP settings (see `.env.example`).
 
 Row-level access rules and PII masking apply to every drill-down path, including exported rows.
 

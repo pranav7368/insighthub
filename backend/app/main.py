@@ -41,6 +41,10 @@ from .analytics.drill import (
 )
 from .analytics.variance import explain_variance, price_volume_mix
 from .analytics.actions import recommend
+from .analytics.reports import (
+    ReportError, ReportNotFound, build_report, create_report, delete_report, email_configured,
+    list_reports, run_due_reports, send_report, set_report_enabled,
+)
 from .analytics.metrictree import explain_metric
 from .analytics.targets import (
     TargetError, delete_target, evaluate as evaluate_target, list_targets, set_target,
@@ -117,6 +121,10 @@ def _run_scheduled_work() -> None:
             pass
     try:
         run_due_alerts(con)  # each alert isolates its own errors
+    except Exception:
+        pass
+    try:
+        run_due_reports(con)  # each report isolates its own errors
     except Exception:
         pass
     try:
@@ -1473,6 +1481,92 @@ def recommended_actions(dataset_id: str, measure: str | None = None, filters: st
     except DrillError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _drill(recommend, dataset_id, principal, measure=measure, filters=parsed)
+
+
+# ------------------------------------------------------ email reports ----
+
+class ReportBody(BaseModel):
+    name: str
+    recipients: list[str] | str
+    frequency: str = "weekly"
+    measure: str | None = None
+
+
+class ReportPatchBody(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/reports/status")
+def reports_status(principal: Principal = Depends(get_principal)):
+    return {"email_configured": email_configured()}
+
+
+@app.get("/api/datasets/{dataset_id}/reports")
+def get_reports(dataset_id: str, principal: Principal = Depends(get_principal)):
+    con = db.connect()
+    try:
+        get_dataset(con, principal.workspace_id, dataset_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    return list_reports(con, principal.workspace_id, dataset_id)
+
+
+@app.post("/api/datasets/{dataset_id}/reports")
+def add_report(dataset_id: str, body: ReportBody, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    try:
+        report = create_report(con, principal.workspace_id, dataset_id, name=body.name,
+                               recipients=body.recipients, frequency=body.frequency,
+                               measure=body.measure, created_by=principal.user_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except ReportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "report_create", report["report_id"])
+    return report
+
+
+@app.get("/api/datasets/{dataset_id}/reports/preview")
+def preview_report(dataset_id: str, measure: str | None = None, principal: Principal = Depends(get_principal)):
+    """What a recipient would get, built now for the asking member — masked, as emailed."""
+    con = db.connect()
+    try:
+        return build_report(con, principal.workspace_id, dataset_id, measure=measure, user_id=principal.user_id)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="dataset not found")
+    except (ReportError, DrillError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.patch("/api/reports/{report_id}")
+def patch_report(report_id: str, body: ReportPatchBody, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    try:
+        return set_report_enabled(con, principal.workspace_id, report_id, body.enabled)
+    except ReportNotFound:
+        raise HTTPException(status_code=404, detail="report not found")
+
+
+@app.post("/api/reports/{report_id}/send")
+def send_report_now(report_id: str, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    try:
+        result = send_report(con, principal.workspace_id, report_id)
+    except ReportNotFound:
+        raise HTTPException(status_code=404, detail="report not found")
+    except ReportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "report_send", report_id)
+    return result
+
+
+@app.delete("/api/reports/{report_id}")
+def remove_report(report_id: str, principal: Principal = Depends(require_editor)):
+    con = db.connect()
+    if not delete_report(con, principal.workspace_id, report_id):
+        raise HTTPException(status_code=404, detail="report not found")
+    db.audit(con, principal.workspace_id, principal.user_id, "report_delete", report_id)
+    return {"ok": True}
 
 
 # ------------------------------------------------------------ targets ----

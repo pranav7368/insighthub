@@ -1314,3 +1314,15 @@ kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fon
 .target__alert { display: inline-block; padding: 0; margin: 2px 0 4px; font-size: 12.5px; }
 
 .forecast-accuracy { margin: 8px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+
+/* scheduled email reports */
+.dq-note { color: var(--text-good); font-size: 13px; margin: 8px 0; }
+.report-preview { margin: 12px 0; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.report-preview__subject { padding: 8px 12px; font-size: 13px; background: var(--surface-2); border-bottom: 1px solid var(--border); }
+.report-preview__frame { display: block; width: 100%; height: 360px; border: 0; background: #fff; }
+.report-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.report-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); flex-wrap: wrap; }
+.report-row__main { font-size: 13.5px; min-width: 0; }
+.report-row__meta { font-size: 12px; color: var(--text-muted); margin-top: 2px; word-break: break-word; }
+.report-row__err { color: var(--text-critical); }
+.report-row__actions { display: flex; gap: 6px; flex-wrap: wrap; }
