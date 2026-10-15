@@ -1,33 +1,31 @@
-// Quick date-range presets computed from the dataset's own latest date.
-// Emit day-format (YYYY-MM-DD) so they display in the date inputs; the `from`
-// is aligned to the first of its month, `to` is the dataset's latest date.
-function firstOfMonthBack(iso, months) {
-  const d = new Date(iso.slice(0, 10) + "T00:00:00");
-  d.setDate(1);
-  d.setMonth(d.getMonth() - months);
-  return d.toISOString().slice(0, 10); // YYYY-MM-DD
-}
+import { presetFrom } from "../dates";
 
 const PRESETS = [
-  { label: "3M", months: 3 },
-  { label: "6M", months: 6 },
-  { label: "12M", months: 12 },
+  { label: "MTD", title: "Month to date" },
+  { label: "QTD", title: "Quarter to date" },
+  { label: "YTD", title: "Year to date" },
+  { label: "3M", title: "Last 3 months" },
+  { label: "6M", title: "Last 6 months" },
+  { label: "12M", title: "Last 12 months" },
 ];
 
 export default function DateRangePresets({ dateSpan, activeFrom, onApply, onClear }) {
   if (!dateSpan?.to) return null;
   const toDate = dateSpan.to.slice(0, 10);
+  // two presets can resolve to the same start (YTD in January = MTD); light the first
+  let lit = false;
   return (
-    <div className="date-presets">
+    <div className="date-presets" role="group" aria-label="Date range">
       {PRESETS.map((p) => {
-        const from = firstOfMonthBack(dateSpan.to, p.months - 1);
-        const active = activeFrom === from;
+        const from = presetFrom(toDate, p.label);
+        const active = !lit && activeFrom === from;
+        if (active) lit = true;
         return (
-          <button key={p.label} className={active ? "active" : ""}
+          <button key={p.label} className={active ? "active" : ""} title={p.title} aria-pressed={active}
             onClick={() => onApply(from, toDate)}>{p.label}</button>
         );
       })}
-      <button className={!activeFrom ? "active" : ""} onClick={onClear}>All</button>
+      <button className={!activeFrom ? "active" : ""} aria-pressed={!activeFrom} onClick={onClear}>All</button>
     </div>
   );
 }

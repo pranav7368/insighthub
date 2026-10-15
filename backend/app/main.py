@@ -39,6 +39,7 @@ from .analytics.drill import (
     DrillError, breakdown as drill_breakdown, inspect as drill_inspect, parse_filters,
     records as drill_records, records_csv as drill_records_csv,
 )
+from .analytics.variance import explain_variance, price_volume_mix
 from .analytics.rls import (
     RuleError, RuleNotFound, create_rule, delete_rule, list_rules, secured_relation,
 )
@@ -1365,6 +1366,38 @@ def slice_rows_csv(dataset_id: str, filters: str | None = None, date_from: str |
                       date_from=date_from, date_to=date_to, sort=sort, desc=desc)
     return Response(content=csv_text, media_type="text/csv",
                     headers={"Content-Disposition": 'attachment; filename="rows.csv"'})
+
+
+@app.get("/api/datasets/{dataset_id}/variance")
+def variance_slice(dataset_id: str, measure: str | None = None, agg: str = "sum",
+                   filters: str | None = None, date_from: str | None = None,
+                   date_to: str | None = None, grain: str = "month", compare: str = "previous",
+                   dimension: str | None = None, limit: int = 8,
+                   principal: Principal = Depends(get_principal)):
+    """Why a slice moved between two periods: a reconciling waterfall by the
+    dimension that best explains it (or the one asked for)."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(explain_variance, dataset_id, principal, measure=measure, agg=agg, filters=parsed,
+                  date_from=date_from, date_to=date_to, grain=grain, compare=compare,
+                  dimension=dimension, limit=limit)
+
+
+@app.get("/api/datasets/{dataset_id}/pvm")
+def pvm_slice(dataset_id: str, measure: str | None = None, volume: str | None = None,
+              filters: str | None = None, date_from: str | None = None, date_to: str | None = None,
+              grain: str = "month", compare: str = "previous", dimension: str | None = None,
+              limit: int = 8, principal: Principal = Depends(get_principal)):
+    """Price / volume / mix split of a value measure's change."""
+    try:
+        parsed = parse_filters(filters)
+    except DrillError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return _drill(price_volume_mix, dataset_id, principal, measure=measure, volume=volume,
+                  filters=parsed, date_from=date_from, date_to=date_to, grain=grain,
+                  compare=compare, dimension=dimension, limit=limit)
 
 
 # --------------------------------------------- certified metrics ---------

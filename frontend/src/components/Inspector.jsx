@@ -6,9 +6,12 @@ import {
   AGG_LABELS, GRAINS, crumbs, drillInto, drillPeriod, pctText, truncateCtx,
 } from "../drill";
 import RecordsTable from "./RecordsTable";
+import ChangeAnalysis from "./ChangeAnalysis";
 
 const TABS = [
   { key: "overview", label: "Overview" },
+  // only for a total/count over dated data — the only kind a change can be split into parts
+  { key: "change", label: "Why it changed", when: (d) => d.trend && d.additive },
   { key: "breakdown", label: "Breakdown" },
   { key: "records", label: "Records" },
   { key: "proof", label: "How it's calculated" },
@@ -23,17 +26,23 @@ function ShareBar({ pct }) {
   );
 }
 
-function CompareChip({ label, cmp, subtype }) {
+function CompareChip({ label, cmp, subtype, onExplain }) {
   if (!cmp) return null;
   const dir = cmp.delta > 0 ? "up" : cmp.delta < 0 ? "down" : "flat";
-  return (
-    <div className={`cmp-chip cmp-chip--${dir}`}>
+  const body = (
+    <>
       <span className="cmp-chip__label">{label} {cmp.period}</span>
       <span className="cmp-chip__value">
         {pctText(cmp.pct) || "—"}{" "}
         <span className="cmp-chip__abs">({cmp.delta >= 0 ? "+" : "−"}{formatNumber(Math.abs(cmp.delta), subtype)})</span>
       </span>
-    </div>
+    </>
+  );
+  // a change you can see is a change you can ask "why" about
+  return onExplain ? (
+    <button className={`cmp-chip cmp-chip--${dir} cmp-chip--btn`} onClick={onExplain} title="Why did it change?">{body}</button>
+  ) : (
+    <div className={`cmp-chip cmp-chip--${dir}`}>{body}</div>
   );
 }
 
@@ -300,7 +309,10 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
   const trail = crumbs(ctx);
   const sub = data?.subtype;
   const cmp = data?.trend?.comparison;
-  const tab = TABS.some((t) => t.key === ctx.tab) ? ctx.tab : "overview";
+  const tabs = TABS.filter((t) => !t.when || (data && t.when(data)));
+  const tab = tabs.some((t) => t.key === ctx.tab) ? ctx.tab : "overview";
+  const explain = data?.trend && data?.additive
+    ? (compare) => go({ ...ctx, tab: "change", compare }, true) : null;
 
   return (
     <aside className="inspector no-export" role="dialog" aria-modal="false" aria-labelledby="inspector-value">
@@ -349,8 +361,10 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
             {cmp && (cmp.previous || cmp.year_ago) && (
               <div className="inspector__compare">
                 <span className="insp-caption">Latest {ctx.grain} ({cmp.period}) vs</span>
-                <CompareChip label="previous" cmp={cmp.previous} subtype={sub} />
-                <CompareChip label="year ago" cmp={cmp.year_ago} subtype={sub} />
+                <CompareChip label="previous" cmp={cmp.previous} subtype={sub}
+                  onExplain={explain && (() => explain("previous"))} />
+                <CompareChip label="year ago" cmp={cmp.year_ago} subtype={sub}
+                  onExplain={explain && (() => explain("year_ago"))} />
               </div>
             )}
             {data.notes.length > 0 && (
@@ -359,7 +373,7 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
           </div>
 
           <div className="insp-tabs" role="tablist" aria-label="Detail views">
-            {TABS.map((t) => (
+            {tabs.map((t) => (
               <button key={t.key} role="tab" id={`insp-tab-${t.key}`} aria-selected={tab === t.key}
                 aria-controls="insp-panel" className={tab === t.key ? "is-on" : ""}
                 onClick={() => go({ ...ctx, tab: t.key }, true)}>{t.label}</button>
@@ -371,6 +385,7 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
             {tab === "breakdown" && <BreakdownTab datasetId={datasetId} data={data} ctx={ctx} go={go} />}
             {tab === "records" && <RecordsTable datasetId={datasetId} slice={ctx} name={data.dataset.name} />}
             {tab === "proof" && <Proof data={data} />}
+            {tab === "change" && <ChangeAnalysis datasetId={datasetId} ctx={ctx} go={go} measures={data.measures} />}
           </div>
 
           <div className="inspector__foot">

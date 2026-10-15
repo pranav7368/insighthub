@@ -118,6 +118,24 @@ export const getBreakdown = (datasetId, s, dimension, limit = 50) =>
     params: { ...sliceParams(s), dimension, limit, measure: s.measure || undefined, agg: s.agg || "sum" },
   }).then((r) => r.data);
 
+// why a slice moved between two periods (reconciling waterfall)
+export const getVariance = (datasetId, s, { dimension, limit } = {}) =>
+  client.get(`/datasets/${datasetId}/variance`, {
+    params: {
+      ...sliceParams(s), measure: s.measure || undefined, agg: s.agg || "sum", grain: s.grain || "month",
+      compare: s.compare || "previous", dimension: dimension || undefined, limit,
+    },
+  }).then((r) => r.data);
+
+// price / volume / mix split of a value measure's change
+export const getPvm = (datasetId, s, { volume, dimension } = {}) =>
+  client.get(`/datasets/${datasetId}/pvm`, {
+    params: {
+      ...sliceParams(s), measure: s.measure || undefined, grain: s.grain || "month",
+      compare: s.compare || "previous", volume: volume || undefined, dimension: dimension || undefined,
+    },
+  }).then((r) => r.data);
+
 export const getRows = (datasetId, s, { sort, desc = true, page = 1, pageSize = 50 } = {}) =>
   client.get(`/datasets/${datasetId}/rows`, {
     params: { ...sliceParams(s), sort: sort || undefined, desc, page, page_size: pageSize },

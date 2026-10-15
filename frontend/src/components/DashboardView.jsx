@@ -23,6 +23,7 @@ import DriverAnalysis from "./DriverAnalysis";
 import ViewsBar from "./ViewsBar";
 import DashSection from "./DashSection";
 import Inspector from "./Inspector";
+import DecompositionTree from "./DecompositionTree";
 import { mappableFraction } from "../geo";
 import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections";
 import { buildUrlSearch, makeCtx, readUrlState } from "../drill";
@@ -318,6 +319,13 @@ export default function DashboardView({ datasetId }) {
         measure: ex.measure, filters: { [dim]: String(name) },
         date_from: ex.current_period, date_to: ex.current_period,
       })} />,
+    },
+    {
+      key: "tree",
+      node: measure && dashboard.date_column && (
+        <DecompositionTree datasetId={datasetId} measure={measure} subtype={subtypeOf(measure)}
+          filters={filters} dateFrom={dateFrom} dateTo={dateTo} onInspect={openInspect} />
+      ),
     },
     { key: "growth", node: <GrowthStrip growth={dashboard.growth} measure={measure} /> },
     { key: "insights", node: <InsightsPanel insights={dashboard.insights} onInvestigate={investigate} /> },

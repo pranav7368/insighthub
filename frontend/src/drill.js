@@ -8,8 +8,8 @@ export const AGG_LABELS = { sum: "Total", avg: "Average", count: "Count", min: "
 export const GRAINS = ["day", "week", "month", "quarter", "year"];
 
 export function makeCtx({ measure = null, agg = "sum", filters = {}, date_from = null, date_to = null,
-  grain = "month", tab = "overview", dimension = null } = {}) {
-  return { measure, agg, filters: { ...filters }, date_from, date_to, grain, tab, dimension };
+  grain = "month", tab = "overview", dimension = null, compare = "previous" } = {}) {
+  return { measure, agg, filters: { ...filters }, date_from, date_to, grain, tab, dimension, compare };
 }
 
 /** One step deeper: pin `dim = value` (insertion order is the drill order). */
@@ -91,8 +91,8 @@ export function buildUrlSearch({ datasetId, measure, dateFrom, dateTo, filters, 
   if (dateTo) q.set("to", dateTo);
   if (filters && Object.keys(filters).length) q.set("f", JSON.stringify(filters));
   if (inspect) {
-    const { measure: im, agg, filters: f, date_from, date_to, grain, tab, dimension } = inspect;
-    q.set("ins", JSON.stringify({ measure: im, agg, filters: f, date_from, date_to, grain, tab, dimension }));
+    const { measure: im, agg, filters: f, date_from, date_to, grain, tab, dimension, compare } = inspect;
+    q.set("ins", JSON.stringify({ measure: im, agg, filters: f, date_from, date_to, grain, tab, dimension, compare }));
   }
   const s = q.toString();
   return s ? `?${s}` : "";
