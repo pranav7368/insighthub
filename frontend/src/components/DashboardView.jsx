@@ -447,7 +447,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
       })} onContext={(e, dim, name, ex) => sliceMenu(e, {
         measure: ex.measure, filters: { [dim]: String(name) },
         date_from: ex.current_period, date_to: ex.current_period,
-      }, `${humanLabel(dim)}: ${name} · ${ex.current_period}`)} />,
+      }, `${humanLabel(dim)}: ${name} · ${formatDate(ex.current_period)}`)} />,
     },
     {
       key: "tree",
@@ -466,7 +466,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
           forecast={dashboard.forecasts?.[measure]}
           anomalies={dashboard.anomalies?.[measure]}
           onPeriod={(period) => openInspect({ date_from: period, date_to: period })}
-          onContext={(e, period) => sliceMenu(e, { date_from: period, date_to: period }, `${humanLabel(measure)} · ${period}`)}
+          onContext={(e, period) => sliceMenu(e, { date_from: period, date_to: period }, `${humanLabel(measure)} · ${formatDate(period)}`)}
         />
       ),
     },

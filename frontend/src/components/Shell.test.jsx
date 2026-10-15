@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { describe, expect, it, vi } from "vitest";
 
-import { formatDate, formatRange } from "../format";
+import { formatDate, formatRange, formatTick } from "../format";
 import Popover from "./Popover";
 import Sidebar from "./Sidebar";
 
@@ -127,5 +127,11 @@ describe("human dates", () => {
     expect(formatRange("2025-11-01", "2026-02-28")).toBe("1 Nov 2025 – 28 Feb 2026");
     expect(formatRange("2026-10", "2026-10")).toBe("Oct 2026");
     expect(formatRange("2026-03", null)).toBe("from Mar 2026");
+  });
+
+  it("keeps axis ticks short", () => {
+    expect(formatTick("2026-10")).toBe("Oct 2026");
+    expect(formatTick("2026-10-28")).toBe("28 Oct");
+    expect(formatTick("2026-Q4")).toBe("2026-Q4");
   });
 });

@@ -34,6 +34,13 @@ export function formatDate(iso) {
   return d ? `${Number(d)} ${month} ${y}` : `${month} ${y}`;
 }
 
+/** Compact axis tick: "Oct 2026" for a month, "28 Oct" for a day. */
+export function formatTick(iso) {
+  const s = String(iso ?? "");
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return formatDate(s).replace(/ \d{4}$/, "");
+  return formatDate(s);
+}
+
 /** A from/to pair as one phrase: "Oct 2026", "1 Jan – 28 Oct 2026", "from Mar 2025". */
 export function formatRange(from, to) {
   if (from && to) {

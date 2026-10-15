@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { appendData, errorText, getBatches, rollbackBatch } from "../api";
+import { formatDate } from "../format";
 
 export default function UpdateData({ datasetId, datasetName, onClose, onChanged }) {
   const [mode, setMode] = useState("append");
@@ -101,7 +102,7 @@ export default function UpdateData({ datasetId, datasetName, onClose, onChanged 
           <tbody>
             {batches.map((b) => (
               <tr key={b.batch_id}>
-                <td>{b.created_at?.slice(0, 16).replace("T", " ")}</td>
+                <td>{formatDate(b.created_at)} {b.created_at?.slice(11, 16)}</td>
                 <td>{b.source_file}</td>
                 <td>{b.mode}</td>
                 <td>+{b.rows_added}</td>

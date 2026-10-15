@@ -33,7 +33,7 @@ export default function BreakdownChart({ dimensionName, breakdown, measure, subt
     }}>
       <div className="chart-card__title">
         {humanLabel(measure)} by {humanLabel(dimensionName)}
-        <span className="chart-card__tag">click a bar for details</span>
+        <span className="chart-card__tag chart-card__hint">click a bar for details</span>
       </div>
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={data} layout="vertical" margin={{ top: 8, right: 16, left: 8, bottom: 0 }}

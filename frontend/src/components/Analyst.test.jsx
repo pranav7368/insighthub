@@ -116,7 +116,7 @@ describe("AskInContext", () => {
   it("asks inside the drilled slice and shows how it was computed", async () => {
     const ctx = makeCtx({ measure: "revenue", filters: { region: "North" }, date_from: "2025-11", date_to: "2025-11" });
     render(<AskInContext datasetId="ds" ctx={ctx} />);
-    expect(screen.getByText(/Region: North · 2025-11 → 2025-11/)).toBeInTheDocument();
+    expect(screen.getByText(/Region: North · Nov 2025/)).toBeInTheDocument();
     await userEvent.type(screen.getByRole("textbox", { name: /question/i }), "total revenue");
     await userEvent.click(screen.getByRole("button", { name: "Ask" }));
     expect(api.queryData).toHaveBeenCalledWith("ds", "total revenue",

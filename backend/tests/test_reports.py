@@ -107,7 +107,7 @@ def test_report_is_built_from_the_computed_numbers(ds):
     r = build_report(con, ws, dsid, measure="revenue")
     # June: 1300 + 660 + 300 = 2260, May: 1250 + 650 + 300 = 2200
     assert "Revenue rose 2.7%" in r["subject"]
-    assert any("Revenue: ₹" in k and "in 2025-06" in k for k in r["facts"]["kpis"])
+    assert any("Revenue: ₹" in k and "in Jun 2025" in k for k in r["facts"]["kpis"])
     # split by the dimension that best explains the move -- here a masked customer
     assert "P*****: +₹50" in r["text"] and "<li>" in r["html"]
     assert "computed directly from your data" in r["text"]

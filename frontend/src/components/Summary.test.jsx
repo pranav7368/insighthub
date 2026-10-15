@@ -37,7 +37,7 @@ describe("SummaryCard", () => {
     expect(await screen.findByText(CHANGE.summary)).toBeInTheDocument();
     expect(screen.getByText("Normal move")).toBeInTheDocument();
     expect(screen.getByText("Like-for-like days")).toBeInTheDocument();
-    expect(screen.getByText(/Target 2026-10: At risk · pace 93%/)).toBeInTheDocument();
+    expect(screen.getByText(/Target Oct 2026: At risk · pace 93%/)).toBeInTheDocument();
   });
 
   it("shows the top two actions, each opening its evidence, and links to the rest", async () => {

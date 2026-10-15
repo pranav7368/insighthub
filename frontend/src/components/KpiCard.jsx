@@ -7,7 +7,7 @@ function TargetLine({ target, subtype }) {
   const pct = Math.round(((target.status === "met" ? target.progress : target.projected_ratio) || 0) * 100);
   return (
     <span className={`kpi-card__target target--${target.status}`}
-      title={`${target.period} target ${formatNumber(target.value, subtype)}: ${TARGET_STATUS[target.status]}`}>
+      title={`${formatDate(target.period)} target ${formatNumber(target.value, subtype)}: ${TARGET_STATUS[target.status]}`}>
       <span className="kpi-card__target-bar" aria-hidden>
         <span style={{ width: `${Math.min(100, (target.progress || 0) * 100)}%` }} />
       </span>

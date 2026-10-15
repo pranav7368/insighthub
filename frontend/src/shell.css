@@ -218,3 +218,25 @@
   .summary { grid-template-columns: 1fr; }
   .summary__actions { border-left: none; padding-left: 0; border-top: 1px solid var(--border); padding-top: 14px; }
 }
+
+/* ===== Card headings: one clear title per card, quieter context =====
+   Every dashboard card opens the same way, so the eye can scan titles down
+   the page; tags (period, model, share) sit beside them in a lighter voice. */
+.chart-card__title, .insights__title, .ai-narrative__title, .dash-section .section-title {
+  font-size: 15px; font-weight: 600; color: var(--text-primary); letter-spacing: -0.01em;
+  display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; margin-bottom: 14px;
+}
+.ai-narrative__title { margin-bottom: 0; }
+.dash-section .driver-head .section-title { margin-bottom: 0; }
+.chart-card__tag, .insights__auto { margin-left: 0; font-size: 12.5px; font-weight: 400; color: var(--text-muted); }
+.chart-card, .insights, .ai-narrative { padding: 18px 20px; }
+
+/* "click a bar for details" is instruction, not information: show it when
+   the pointer is on the chart (always on touch screens, which cannot hover) */
+.chart-card__hint { opacity: 0; transition: opacity var(--transition); }
+.chart-card:hover .chart-card__hint, .chart-card:focus-within .chart-card__hint { opacity: 1; }
+@media (hover: none) { .chart-card__hint { opacity: 1; } }
+
+/* steadier rhythm between sections */
+.dash-content { gap: 24px; }
+

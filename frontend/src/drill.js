@@ -2,7 +2,7 @@
 //   { measure, agg, filters: {col: value, ...}, date_from, date_to, grain, tab, dimension }
 // Every chart emits one on click, the inspector renders one, and the URL
 // stores one, so drilling is the same operation everywhere.
-import { humanLabel } from "./format";
+import { formatRange, humanLabel } from "./format";
 
 export const AGG_LABELS = { sum: "Total", avg: "Average", count: "Count", min: "Minimum", max: "Maximum", median: "Median" };
 export const GRAINS = ["day", "week", "month", "quarter", "year"];
@@ -20,9 +20,7 @@ export const drillInto = (ctx, dim, value) =>
 export const drillPeriod = (ctx, from, to) => ({ ...ctx, date_from: from, date_to: to, tab: "overview" });
 
 export function periodLabel(from, to) {
-  if (!from && !to) return null;
-  if (from && to) return from === to ? from : `${from} → ${to}`;
-  return from ? `from ${from}` : `until ${to}`;
+  return from || to ? formatRange(from, to) : null;
 }
 
 /**

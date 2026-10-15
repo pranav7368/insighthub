@@ -1,7 +1,7 @@
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { formatNumber, humanLabel } from "../format";
+import { formatDate, formatNumber, formatTick, humanLabel } from "../format";
 
 // Overlays two series (A vs B) on a shared time axis. Two series => a legend
 // is always shown, so identity is never colour-alone.
@@ -11,7 +11,7 @@ function Tip({ active, payload, label, subtype, labelA, labelB }) {
   const b = payload.find((p) => p.dataKey === "b");
   return (
     <div className="chart-tooltip">
-      <div className="chart-tooltip__label">{label}</div>
+      <div className="chart-tooltip__label">{formatDate(label)}</div>
       {a && <div className="chart-tooltip__value" style={{ color: "var(--series-1)" }}>{labelA}: {formatNumber(a.value, subtype)}</div>}
       {b && <div className="chart-tooltip__value" style={{ color: "var(--series-2)" }}>{labelB}: {formatNumber(b.value, subtype)}</div>}
     </div>
@@ -26,7 +26,7 @@ export default function ComparisonChart({ data, measure, subtype, labelA, labelB
       <ResponsiveContainer width="100%" height={300}>
         <LineChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
           <CartesianGrid stroke="var(--gridline)" vertical={false} />
-          <XAxis dataKey="period" stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} minTickGap={20} />
+          <XAxis dataKey="period" tickFormatter={formatTick} stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} minTickGap={20} />
           <YAxis stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} axisLine={false}
             tickFormatter={(v) => formatNumber(v, subtype)} width={70} />
           <Tooltip content={<Tip subtype={subtype} labelA={labelA} labelB={labelB} />} cursor={{ stroke: "var(--baseline)" }} />

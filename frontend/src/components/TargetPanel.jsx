@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { deleteTarget, errorText, setTarget } from "../api";
-import { formatNumber, humanLabel } from "../format";
+import { formatDate, formatNumber, humanLabel } from "../format";
 import { TARGET_STATUS, currentPeriod } from "../drill";
 
 const GRAIN_LABEL = { month: "Month", quarter: "Quarter", year: "Year" };
@@ -51,7 +51,7 @@ export default function TargetPanel({ datasetId, ctx, target, subtype, lastDate,
         <div className={`target target--${target.status}`}>
           <div className="target__head">
             <span className="target__status">{TARGET_STATUS[target.status] || target.status}</span>
-            <span className="target__period">{target.period}</span>
+            <span className="target__period">{formatDate(target.period)}</span>
           </div>
           {target.status === "broken" ? (
             <p className="insp-caption">{target.reason}</p>

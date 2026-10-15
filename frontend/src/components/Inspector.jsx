@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { errorText } from "../api";
 import { useDrillApi } from "../drillApi";
-import { formatNumber, humanLabel } from "../format";
+import { formatDate, formatNumber, formatTick, humanLabel } from "../format";
 import {
   AGG_LABELS, GRAINS, crumbs, drillInto, drillPeriod, pctText, targetFor, truncateCtx,
 } from "../drill";
@@ -36,7 +36,7 @@ function CompareChip({ label, cmp, subtype, onExplain }) {
   const dir = cmp.delta > 0 ? "up" : cmp.delta < 0 ? "down" : "flat";
   const body = (
     <>
-      <span className="cmp-chip__label">{label} {cmp.period}</span>
+      <span className="cmp-chip__label">{label} {formatDate(cmp.period)}</span>
       <span className="cmp-chip__value">
         {pctText(cmp.pct) || "—"}{" "}
         <span className="cmp-chip__abs">({cmp.delta >= 0 ? "+" : "−"}{formatNumber(Math.abs(cmp.delta), subtype)})</span>
@@ -56,7 +56,7 @@ function TrendTip({ active, payload, subtype }) {
   const p = payload[0].payload;
   return (
     <div className="chart-tooltip">
-      <div className="chart-tooltip__label">{p.period}</div>
+      <div className="chart-tooltip__label">{formatDate(p.period)}</div>
       <div className="chart-tooltip__value">{formatNumber(p.value, subtype)} · {p.rows.toLocaleString("en-IN")} rows</div>
       <div className="chart-tooltip__hint">click to drill into this period</div>
     </div>
@@ -104,7 +104,7 @@ function Overview({ data, ctx, go, targetProps }) {
                   if (p) go(drillPeriod(ctx, p.from, p.to));
                 }}>
                 <CartesianGrid stroke="var(--gridline)" vertical={false} />
-                <XAxis dataKey="period" stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 10 }}
+                <XAxis dataKey="period" tickFormatter={formatTick} stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 10 }}
                   tickLine={false} minTickGap={16} />
                 <YAxis stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 10 }} tickLine={false}
                   axisLine={false} width={56} tickFormatter={(v) => formatNumber(v, sub)} />
@@ -120,8 +120,8 @@ function Overview({ data, ctx, go, targetProps }) {
           )}
           {trend.comparison && (
             <p className="insp-caption">
-              Latest {ctx.grain}: <b>{trend.comparison.period}</b> — {formatNumber(trend.comparison.value, sub)}
-              {trend.latest_period_partial && " (incomplete — data ends " + trend.data_through + ")"}
+              Latest {ctx.grain}: <b>{formatDate(trend.comparison.period)}</b> — {formatNumber(trend.comparison.value, sub)}
+              {trend.latest_period_partial && ` (incomplete — data ends ${formatDate(trend.data_through)})`}
             </p>
           )}
         </section>
@@ -369,7 +369,7 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
             </div>
             {cmp && (cmp.previous || cmp.year_ago) && (
               <div className="inspector__compare">
-                <span className="insp-caption">Latest {ctx.grain} ({cmp.period}) vs</span>
+                <span className="insp-caption">Latest {ctx.grain} ({formatDate(cmp.period)}) vs</span>
                 <CompareChip label="previous" cmp={cmp.previous} subtype={sub}
                   onExplain={explain && (() => explain("previous"))} />
                 <CompareChip label="year ago" cmp={cmp.year_ago} subtype={sub}

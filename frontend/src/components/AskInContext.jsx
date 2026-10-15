@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { errorText, queryData } from "../api";
-import { humanLabel } from "../format";
+import { formatRange, humanLabel } from "../format";
 import ResultChart from "./ResultChart";
 
 /**
@@ -15,7 +15,7 @@ export default function AskInContext({ datasetId, ctx }) {
   const [busy, setBusy] = useState(false);
   const scope = [
     ...Object.entries(ctx.filters || {}).map(([k, v]) => `${humanLabel(k)}: ${v}`),
-    ...(ctx.date_from || ctx.date_to ? [`${ctx.date_from || "…"} → ${ctx.date_to || "…"}`] : []),
+    ...(ctx.date_from || ctx.date_to ? [formatRange(ctx.date_from, ctx.date_to)] : []),
   ];
   const measure = humanLabel(ctx.measure || "revenue").toLowerCase();
   const suggestions = [`${measure} by month`, `top 5 by ${measure}`, `average ${measure}`];

@@ -14,7 +14,7 @@ describe("ForecastChart", () => {
     render(<ForecastChart measure="revenue" subtype={null} forecast={{
       ...base, accuracy: { mape: 4.2, mae: 12.5, tests: 21, months: 8, candidates: [{}, {}, {}, {}, {}] },
     }} />);
-    expect(screen.getByText(/next 1mo · Holt-Winters/)).toBeInTheDocument();
+    expect(screen.getByText(/next month · Holt-Winters/)).toBeInTheDocument();
     expect(screen.getByText(/testing 5 standard models against what actually happened over the last 8 months/))
       .toBeInTheDocument();
     expect(screen.getByText(/off by 4.2% on average/)).toBeInTheDocument();

@@ -26,7 +26,7 @@ from ..core.sqlsafe import quote_identifier, safe_identifier, safe_table_name
 from ..qa.llm import LLM, extract_json, get_llm
 from .engine import DatasetNotFound, _date_bounds, get_columns, get_dataset
 from .drill import DrillError, _check_date
-from .intelligence import format_value
+from .intelligence import format_value, human_period
 
 AGGREGATIONS = {"sum", "avg", "min", "max", "count"}
 CHART_TYPES = {"bar", "line", "pie", "kpi", "table"}
@@ -294,8 +294,8 @@ def summarize(result: dict, intent: QueryIntent) -> str:
         lo = min(data, key=lambda d: d["value"] or 0)
         last = data[-1]
         return (f"{agg_word} {metric_label} by month ranges from {format_value(lo['value'], sub)} "
-                f"({lo['label']}) to {format_value(hi['value'], sub)} ({hi['label']}); "
-                f"latest is {format_value(last['value'], sub)} in {last['label']}.")
+                f"({human_period(lo['label'])}) to {format_value(hi['value'], sub)} ({human_period(hi['label'])}); "
+                f"latest is {format_value(last['value'], sub)} in {human_period(last['label'])}.")
 
     # grouped
     top = data[0]

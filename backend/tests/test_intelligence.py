@@ -6,12 +6,19 @@ import io
 
 from app.analytics.engine import compute_dashboard
 from app.analytics.intelligence import (
-    build_insights, detect_anomalies, forecast_series, next_month,
+    build_insights, detect_anomalies, forecast_series, human_period, next_month,
 )
 from app.ingest.pipeline import ingest_upload
 
 
 # ---- period math ----
+
+def test_human_period_reads_like_prose():
+    assert human_period("2026-10") == "Oct 2026"
+    assert human_period("2026-01-05") == "5 Jan 2026"
+    # not a calendar month or day: left exactly as it was
+    assert [human_period(p) for p in ("2026-Q4", "2026", "2026-13", "", None)] == ["2026-Q4", "2026", "2026-13", "", ""]
+
 
 def test_next_month_rolls_over_year():
     assert next_month("2025-11") == "2025-12"

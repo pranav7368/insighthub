@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getVariance } from "../api";
 import { TARGET_STATUS, pctText } from "../drill";
-import { formatNumber, humanLabel } from "../format";
+import { formatDate, formatNumber, humanLabel } from "../format";
 import Icon from "./Icon";
 
 const SEV_LABEL = { high: "Act now", medium: "Worth a look", low: "Opportunity" };
@@ -57,7 +57,7 @@ export default function SummaryCard({ datasetId, measure, subtype, filters, date
           {change?.like_for_like && <span className="summary__chip">Like-for-like days</span>}
           {target && target.status !== "broken" && (
             <span className={`summary__chip target--${target.status}`}>
-              Target {target.period}: {TARGET_STATUS[target.status]}
+              Target {formatDate(target.period)}: {TARGET_STATUS[target.status]}
               {target.projected_ratio != null && ` · pace ${Math.round(target.projected_ratio * 100)}%`}
             </span>
           )}

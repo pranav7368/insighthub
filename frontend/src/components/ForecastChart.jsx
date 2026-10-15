@@ -3,7 +3,7 @@ import {
   Area, CartesianGrid, ComposedChart, Line, ReferenceDot,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { formatNumber, humanLabel } from "../format";
+import { formatDate, formatNumber, formatTick, humanLabel } from "../format";
 
 function ChartTooltip({ active, payload, label, subtype }) {
   if (!active || !payload?.length) return null;
@@ -15,7 +15,7 @@ function ChartTooltip({ active, payload, label, subtype }) {
   const pct = actual && prev ? ((actual.value - prev) / Math.abs(prev)) * 100 : null;
   return (
     <div className="chart-tooltip">
-      <div className="chart-tooltip__label">{label}{projected && !actual ? " · projected" : ""}</div>
+      <div className="chart-tooltip__label">{formatDate(label)}{projected && !actual ? " · projected" : ""}</div>
       <div className="chart-tooltip__value">{formatNumber(row.value, subtype)}</div>
       {pct != null && (
         <div className={`chart-tooltip__cmp delta--${pct >= 0 ? "up" : "down"}`}>
@@ -54,8 +54,8 @@ export default function ForecastChart({ measure, subtype, forecast, anomalies, o
     }}>
       <div className="chart-card__title">
         {humanLabel(measure)} — trend & forecast
-        {proj.length > 0 && <span className="chart-card__tag">next {proj.length}mo · {forecast.label || forecast.method}</span>}
-        {onPeriod && <span className="chart-card__tag">click a month for details</span>}
+        {proj.length > 0 && <span className="chart-card__tag">next {proj.length === 1 ? "month" : `${proj.length} months`} · {forecast.label || forecast.method}</span>}
+        {onPeriod && <span className="chart-card__tag chart-card__hint">click a month for details</span>}
       </div>
       <ResponsiveContainer width="100%" height={300}>
         <ComposedChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}
@@ -71,7 +71,7 @@ export default function ForecastChart({ measure, subtype, forecast, anomalies, o
             if (onPeriod && row && row.actual != null) onPeriod(row.period);
           }}>
           <CartesianGrid stroke="var(--gridline)" vertical={false} />
-          <XAxis dataKey="period" stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} minTickGap={20} />
+          <XAxis dataKey="period" tickFormatter={formatTick} stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} minTickGap={20} />
           <YAxis stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} axisLine={false}
             tickFormatter={(v) => formatNumber(v, subtype)} width={72} />
           <Tooltip content={<ChartTooltip subtype={subtype} />} cursor={{ stroke: "var(--baseline)" }} />
