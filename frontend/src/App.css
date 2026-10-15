@@ -960,7 +960,7 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 @media (prefers-reduced-motion: reduce) { .inspector { animation: none; } }
 /* only make room when the dashboard still has a comfortable width left;
    below that the drawer overlays, which beats squeezing every chart */
-@media (min-width: 1700px) { .dash-layout.has-inspector { padding-right: 560px; } }
+@media (min-width: 1700px) { .dash-layout.has-inspector { padding-right: var(--insp-pad, 560px); } }
 
 .inspector__head { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
 .crumbs { flex: 1; min-width: 0; }

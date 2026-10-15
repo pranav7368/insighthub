@@ -240,3 +240,74 @@
 /* steadier rhythm between sections */
 .dash-content { gap: 24px; }
 
+/* ===== Toasts ===== */
+.toaster {
+  position: fixed; right: 20px; bottom: 20px; z-index: 90;
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-end; pointer-events: none;
+}
+.toaster > div { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
+.toast {
+  pointer-events: auto; display: flex; align-items: center; gap: 10px;
+  max-width: min(420px, calc(100vw - 32px)); padding: 10px 10px 10px 12px;
+  background: var(--text-primary); color: var(--surface-1);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); font-size: 13.5px; line-height: 1.4;
+  animation: toast-in 180ms ease-out;
+}
+.toast__icon {
+  flex: none; width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 12px; font-weight: 700; background: var(--success-text); color: #fff;
+}
+.toast--error .toast__icon { background: var(--status-critical); }
+.toast--info .toast__icon { background: var(--series-1); }
+.toast__msg { flex: 1; }
+.toast__x {
+  flex: none; display: grid; place-items: center; width: 26px; height: 26px; border: 0; border-radius: 6px;
+  background: transparent; color: inherit; opacity: 0.7; cursor: pointer;
+}
+.toast__x:hover, .toast__x:focus-visible { opacity: 1; background: color-mix(in srgb, currentColor 14%, transparent); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (max-width: 760px) { .toaster { left: 16px; right: 16px; bottom: 16px; align-items: stretch; } .toast { max-width: none; } }
+@media (prefers-reduced-motion: reduce) { .toast { animation: none; } }
+
+/* ===== Inspector: resizable, and a wide mode that pins the number ===== */
+.inspector { width: min(var(--insp-w, 540px), 100vw); }
+.inspector__resize {
+  position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; z-index: 2; cursor: col-resize;
+  touch-action: none;
+}
+.inspector__resize::after {
+  content: ""; position: absolute; left: 3px; top: 50%; width: 2px; height: 36px; margin-top: -18px;
+  border-radius: 2px; background: var(--border); transition: background var(--transition), height var(--transition);
+}
+.inspector__resize:hover::after, .inspector__resize:focus-visible::after { background: var(--series-1); height: 64px; margin-top: -32px; }
+.inspector__resize:focus-visible { outline: none; }
+body.is-resizing { cursor: col-resize; user-select: none; }
+body.is-resizing .inspector { transition: none; }
+
+/* wide: the headline number and its comparisons stay put on the left while
+   the tabs scroll on the right, so the "what" never leaves the screen */
+.inspector--wide {
+  width: min(1180px, calc(100vw - 32px));
+  display: grid; grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+.inspector--wide > * { grid-column: 1 / -1; }
+.inspector--wide > .inspector__hero {
+  grid-column: 1; grid-row: 2 / 4; overflow-y: auto; border-right: 1px solid var(--border);
+  padding-top: var(--sp-5, 20px);
+}
+.inspector--wide > .insp-tabs { grid-column: 2; grid-row: 2; }
+.inspector--wide > .inspector__body { grid-column: 2; grid-row: 3; }
+.inspector--wide .inspector__value { font-size: 40px; }
+
+@media (max-width: 600px) {
+  .inspector, .inspector--wide { width: 100vw; display: flex; }
+  .inspector__resize, .insp-expand { display: none; }
+}
+
+/* a filter combination with no rows: say so, and offer the way back */
+.empty-state--inline {
+  padding: 56px 24px; background: var(--surface-1); border: 1px dashed var(--border); border-radius: 12px;
+}
+.empty-state--inline h2 { margin: 0; font-size: 18px; color: var(--text-primary); }
+.empty-state--inline p { margin: 0 0 6px; max-width: 460px; line-height: 1.5; }

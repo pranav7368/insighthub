@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { createAlert, deleteAlert, errorText, getSchema, listAlerts, setAlertEnabled, testAlert } from "../api";
 import { humanLabel } from "../format";
+import { toast } from "../toast";
 
 const AGGREGATES = [
   { value: "total", label: "Total" },
@@ -59,6 +60,7 @@ export default function AlertsDialog({ datasetId, onClose, preset }) {
       });
       setForm((f) => ({ ...f, name: "", threshold: "" }));
       load();
+      toast(`Alert “${form.name.trim()}” created`);
     } catch (err) {
       setError(errorText(err, "Could not create the alert."));
     } finally {

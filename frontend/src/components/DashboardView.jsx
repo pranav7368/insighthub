@@ -32,6 +32,7 @@ import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections
 import { buildUrlSearch, makeCtx, readUrlState, targetFor } from "../drill";
 import { buildCommands } from "../palette";
 import { formatDate, formatRange, humanLabel } from "../format";
+import { toast, toastError } from "../toast";
 import { SECTIONS } from "../sections";
 
 // opened on demand, so their code is fetched on first use
@@ -120,22 +121,34 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
       const v = await createView(datasetId, name, currentConfig(), views.length === 0);
       await reloadViews();
       setActiveViewId(v.view_id);
-    } catch (e) { setError(errorText(e, "Could not save the view.")); }
+      toast(`Saved view “${name}”`);
+    } catch (e) { toastError(errorText(e, "Could not save the view.")); }
   };
   const updateActiveView = async () => {
     if (!activeViewId) return;
-    try { await updateView(activeViewId, { config: currentConfig() }); await reloadViews(); }
-    catch (e) { setError(errorText(e, "Could not update the view.")); }
+    try {
+      await updateView(activeViewId, { config: currentConfig() });
+      await reloadViews();
+      toast(`Updated view “${activeView?.name}”`);
+    } catch (e) { toastError(errorText(e, "Could not update the view.")); }
   };
   const setDefaultActiveView = async () => {
     if (!activeViewId) return;
-    try { await updateView(activeViewId, { is_default: true }); await reloadViews(); }
-    catch (e) { setError(errorText(e, "Could not set the default.")); }
+    try {
+      await updateView(activeViewId, { is_default: true });
+      await reloadViews();
+      toast(`“${activeView?.name}” now opens first for this dataset`);
+    } catch (e) { toastError(errorText(e, "Could not set the default.")); }
   };
   const deleteActiveView = async () => {
     if (!activeViewId) return;
-    try { await deleteView(activeViewId); setActiveViewId(null); await reloadViews(); }
-    catch (e) { setError(errorText(e, "Could not delete the view.")); }
+    const name = activeView?.name;
+    try {
+      await deleteView(activeViewId);
+      setActiveViewId(null);
+      await reloadViews();
+      toast(`Deleted view “${name}”`);
+    } catch (e) { toastError(errorText(e, "Could not delete the view.")); }
   };
   const toggleSection = (key) =>
     setHiddenSections((h) => (h.includes(key) ? h.filter((x) => x !== key) : [...h, key]));
@@ -165,9 +178,10 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
       const name = dashboard?.dataset?.name || "dashboard";
       if (kind === "png") await exportPng(contentRef.current, name);
       else await exportPdf(contentRef.current, name);
+      toast(`${kind.toUpperCase()} downloaded`);
     } catch {
       // the underlying error is not actionable for the user
-      setError("Export failed. Try again.");
+      toastError("Export failed. Try again.");
     } finally {
       setExporting(null);
     }
@@ -402,6 +416,10 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
     if (hiddenSections.includes("actions")) toggleSection("actions");
     setTimeout(() => document.getElementById("recommended-actions")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
+
+  // A filter combination with no rows would otherwise draw a page of zeros.
+  const noRows = dashboard.row_count_filtered === 0 && (activeFilterCount > 0 || Boolean(dateFrom || dateTo));
+  const clearScope = () => { setFilters({}); setDateFrom(undefined); setDateTo(undefined); };
 
   // Every section, in its natural order. A null node means "this dataset has
   // nothing to show here" — those drop out entirely so arrange mode never
@@ -676,8 +694,18 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
         )}
         {exporting && <div className="export-busy no-export" role="status">Preparing {exporting.toUpperCase()}…</div>}
 
+        {noRows && (
+          <div className="empty-state empty-state--inline" role="status">
+            <h2>No rows match this view</h2>
+            <p>
+              The filters and date range together leave nothing to count. Widen or clear them to see the numbers again.
+            </p>
+            <button className="views-btn views-btn--accent" onClick={clearScope}>Clear filters and dates</button>
+          </div>
+        )}
+
         {/* pinned first, outside the arrangeable sections: it is the page's answer */}
-        {show("summary") && measure && (
+        {!noRows && show("summary") && measure && (
           <SummaryCard datasetId={datasetId} measure={measure} subtype={subtypeOf(measure)}
             filters={filters} dateFrom={dateFrom} dateTo={dateTo}
             target={targetFor(targets, { measure, filters, date_from: dateFrom, date_to: dateTo })}
@@ -692,7 +720,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
           </div>
         )}
 
-        {visible.map(({ key, node }, i) => (
+        {!noRows && visible.map(({ key, node }, i) => (
           <DashSection
             key={key} sectionKey={key} arranging={arranging}
             isFirst={i === 0} isLast={i === visible.length - 1}

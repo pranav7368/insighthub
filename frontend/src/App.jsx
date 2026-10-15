@@ -7,6 +7,8 @@ import Icon from "./components/Icon";
 import TemplateGallery from "./components/TemplateGallery";
 import DashboardView from "./components/DashboardView";
 import TourOverlay from "./components/TourOverlay";
+import Toaster from "./components/Toaster";
+import { toast } from "./toast";
 import { TOUR_KEY, TOUR_STEPS } from "./tour";
 import { readUrlState } from "./drill";
 
@@ -121,6 +123,8 @@ export default function App() {
   const handleUpload = async (file) => {
     const result = await uploadDataset(file);
     const list = await refresh();
+    toast(`Uploaded “${result.name || file.name}”`
+      + (result.row_count ? ` · ${Number(result.row_count).toLocaleString("en-IN")} rows` : ""));
     if (result.kind === "structured") {
       setDatasetId(result.dataset_id);
       setTab("dashboard");
@@ -334,6 +338,7 @@ export default function App() {
       )}
       </Suspense>
       {tourOn && <TourOverlay steps={TOUR_STEPS} onFinish={endTour} />}
+      <Toaster />
     </div>
   );
 }

@@ -3,6 +3,7 @@ import {
   addMember, changePassword, deleteMember, errorText, getWorkspaceSecurity,
   listMembers, setWorkspaceSecurity, updateMemberRole,
 } from "../api";
+import { toast } from "../toast";
 
 const ROLES = [
   { value: "admin", label: "Admin — full control + team" },
@@ -63,7 +64,7 @@ export default function TeamDialog({ onClose }) {
       await changePassword(pw.old, pw.next);
       setPw({ open: false, old: "", next: "", note: null });
       setError(null);
-      alert("Password changed.");
+      toast("Password changed");
     } catch (err) {
       setPw((p) => ({ ...p, note: errorText(err, "Could not change password.") }));
     }

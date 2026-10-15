@@ -31,6 +31,8 @@ const PATHS = {
   download: "M12 4v12M7 11l5 5 5-5M4 20h16",
   layout: "M4 4h16v16H4zM4 10h16M10 10v10",
   calendar: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
+  expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7",
+  shrink: "M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7",
 };
 
 export default function Icon({ name, size = 18, className = "", title }) {

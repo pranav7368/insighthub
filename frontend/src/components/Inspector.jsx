@@ -10,6 +10,18 @@ import RecordsTable from "./RecordsTable";
 import ChangeAnalysis from "./ChangeAnalysis";
 import AskInContext from "./AskInContext";
 import TargetPanel from "./TargetPanel";
+import Icon from "./Icon";
+
+// The panel's width and wide mode are a personal preference, kept per browser.
+const W_KEY = "ih_insp_w", WIDE_KEY = "ih_insp_wide", W_DEFAULT = 540, W_MIN = 400;
+const maxWidth = () => Math.max(W_MIN, Math.min(1000, window.innerWidth - 120));
+const clampWidth = (w) => Math.round(Math.min(Math.max(w, W_MIN), maxWidth()));
+function readPref(key, fallback) {
+  try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+}
+function writePref(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* private mode: the default is fine */ }
+}
 
 const TABS = [
   { key: "overview", label: "Overview" },
@@ -292,6 +304,38 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
   const closeRef = useRef(null);
+  const [width, setWidth] = useState(() => clampWidth(Number(readPref(W_KEY, W_DEFAULT)) || W_DEFAULT));
+  const [wide, setWide] = useState(() => readPref(WIDE_KEY, "0") === "1");
+
+  // The dashboard makes room for the panel (on screens wide enough to keep
+  // both readable); wide mode overlays instead, so nothing reflows under it.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.style.setProperty("--insp-w", `${width}px`);
+    root.style.setProperty("--insp-pad", wide ? "0px" : `${width + 20}px`);
+    writePref(W_KEY, String(width));
+    return () => { root.style.removeProperty("--insp-w"); root.style.removeProperty("--insp-pad"); };
+  }, [width, wide]);
+
+  const toggleWide = () => setWide((w) => { writePref(WIDE_KEY, w ? "0" : "1"); return !w; });
+  const startResize = (e) => {
+    e.preventDefault();
+    const move = (ev) => setWidth(clampWidth(window.innerWidth - ev.clientX));
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("is-resizing");
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    document.body.classList.add("is-resizing");
+  };
+  const resizeKey = (e) => {
+    const step = e.shiftKey ? 120 : 40;
+    if (e.key === "ArrowLeft") { e.preventDefault(); setWidth((w) => clampWidth(w + step)); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); setWidth((w) => clampWidth(w - step)); }
+    else if (e.key === "Home") { e.preventDefault(); setWidth(clampWidth(W_DEFAULT)); }
+  };
   const key = JSON.stringify([ctx.measure, ctx.agg, ctx.filters, ctx.date_from, ctx.date_to, ctx.grain]);
 
   useEffect(() => {
@@ -324,7 +368,14 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
     ? (compare) => go({ ...ctx, tab: "change", compare }, true) : null;
 
   return (
-    <aside className="inspector no-export" role="dialog" aria-modal="false" aria-labelledby="inspector-value">
+    <aside className={`inspector no-export${wide ? " inspector--wide" : ""}`} role="dialog" aria-modal="false"
+      aria-labelledby="inspector-value">
+      {!wide && (
+        <div className="inspector__resize" role="separator" aria-orientation="vertical" tabIndex={0}
+          aria-label="Resize details panel" aria-valuenow={width} aria-valuemin={W_MIN} aria-valuemax={maxWidth()}
+          title="Drag to resize · double-click to reset"
+          onPointerDown={startResize} onKeyDown={resizeKey} onDoubleClick={() => setWidth(clampWidth(W_DEFAULT))} />
+      )}
       <div className="inspector__head">
         <nav className="crumbs" aria-label="Drill path">
           <ol>
@@ -339,6 +390,10 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
             ))}
           </ol>
         </nav>
+        <button className="icon-btn insp-expand" aria-label="Expand details" aria-pressed={wide}
+          title={wide ? "Back to a side panel" : "Expand: keep the number in view while you explore"} onClick={toggleWide}>
+          <Icon name={wide ? "shrink" : "expand"} size={16} />
+        </button>
         <button ref={closeRef} className="icon-btn" aria-label="Close details" onClick={onClose}>✕</button>
       </div>
 
