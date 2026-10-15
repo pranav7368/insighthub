@@ -1,26 +1,29 @@
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { getSchema, listDatasets, overrideColumn, uploadDataset } from "./api";
 import Login from "./components/Login";
 import UploadButton from "./components/UploadButton";
-import ConnectSource from "./components/ConnectSource";
 import TemplateGallery from "./components/TemplateGallery";
-import AccessDialog from "./components/AccessDialog";
-import SecurityDialog from "./components/SecurityDialog";
-import ShareDialog from "./components/ShareDialog";
-import AlertsDialog from "./components/AlertsDialog";
-import MetricsDialog from "./components/MetricsDialog";
-import JoinDialog from "./components/JoinDialog";
-import TeamDialog from "./components/TeamDialog";
-import BillingDialog from "./components/BillingDialog";
-import SchemaReview from "./components/SchemaReview";
-import DataQuality from "./components/DataQuality";
-import UpdateData from "./components/UpdateData";
 import DashboardView from "./components/DashboardView";
-import ComparePane from "./components/ComparePane";
-import AskView from "./components/AskView";
 import TourOverlay from "./components/TourOverlay";
 import { TOUR_KEY, TOUR_STEPS } from "./tour";
 import { readUrlState } from "./drill";
+
+// Loaded on first use: most sessions never open a dialog, Ask or Compare, so
+// their code stays out of the first download.
+const ConnectSource = lazy(() => import("./components/ConnectSource"));
+const AccessDialog = lazy(() => import("./components/AccessDialog"));
+const SecurityDialog = lazy(() => import("./components/SecurityDialog"));
+const ShareDialog = lazy(() => import("./components/ShareDialog"));
+const AlertsDialog = lazy(() => import("./components/AlertsDialog"));
+const MetricsDialog = lazy(() => import("./components/MetricsDialog"));
+const JoinDialog = lazy(() => import("./components/JoinDialog"));
+const TeamDialog = lazy(() => import("./components/TeamDialog"));
+const BillingDialog = lazy(() => import("./components/BillingDialog"));
+const SchemaReview = lazy(() => import("./components/SchemaReview"));
+const DataQuality = lazy(() => import("./components/DataQuality"));
+const UpdateData = lazy(() => import("./components/UpdateData"));
+const ComparePane = lazy(() => import("./components/ComparePane"));
+const AskView = lazy(() => import("./components/AskView"));
 
 function useTheme() {
   const [theme, setTheme] = useState(() => localStorage.getItem("ih_theme") || "auto");
@@ -244,10 +247,13 @@ export default function App() {
             datasetId && <DashboardView key={`${datasetId}-${dashboardKey}`} datasetId={datasetId} canEdit={canEdit} />
           )
         )}
-        {tab === "compare" && datasetId && <ComparePane key={datasetId} datasetId={datasetId} />}
-        {tab === "ask" && <AskView datasetId={datasetId} hasStructured={structuredDatasets.length > 0} />}
+        <Suspense fallback={<div className="empty-panel">Loading…</div>}>
+          {tab === "compare" && datasetId && <ComparePane key={datasetId} datasetId={datasetId} />}
+          {tab === "ask" && <AskView datasetId={datasetId} hasStructured={structuredDatasets.length > 0} />}
+        </Suspense>
       </main>
 
+      <Suspense fallback={null}>
       {showConnect && (
         <ConnectSource
           onClose={() => setShowConnect(false)}
@@ -315,6 +321,7 @@ export default function App() {
           onChanged={() => { refresh(); setDashboardKey((k) => k + 1); }}
         />
       )}
+      </Suspense>
       {tourOn && <TourOverlay steps={TOUR_STEPS} onFinish={endTour} />}
     </div>
   );

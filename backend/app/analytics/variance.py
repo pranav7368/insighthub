@@ -225,16 +225,30 @@ def _bounds(p):
     return [lo, hi]
 
 
-def _split_change(con, sl, dim, measure, agg, pa, pb, limit):
-    """Per-member A, B, delta for one dimension — NULL members kept, so the
-    steps always add up to the total change."""
-    gq = safe_identifier(dim, sl.allowed)
+def _member_rows(con, sl, dims, measure, agg, pa, pb) -> dict:
+    """{dimension: [(member, value in A, value in B), ...]} for every dimension
+    from ONE scan (GROUPING SETS) rather than one scan per dimension — the
+    ranking below needs them all, and on a wide table that was the cost."""
+    cols = [safe_identifier(d, sl.allowed) for d in dims]
     a_expr, b_expr, window = _period_sql(sl, measure, agg)
     where, params, _ = sl.where(window, dates=False)
+    flags = ", ".join(f"GROUPING({c})" for c in cols)
     rows = con.execute(
-        f"SELECT {gq} AS g, {a_expr} AS a, {b_expr} AS b FROM {sl.relation} {where} GROUP BY 1",
+        f"SELECT {flags}, {', '.join(cols)}, {a_expr}, {b_expr} FROM {sl.relation} {where} "
+        f"GROUP BY GROUPING SETS ({', '.join(f'({c})' for c in cols)})",
         _bounds(pa) + _bounds(pb) + params + _bounds(pa) + _bounds(pb),
     ).fetchall()
+    k = len(dims)
+    out = {d: [] for d in dims}
+    for r in rows:
+        i = next(j for j in range(k) if r[j] == 0)
+        out[dims[i]].append((r[k + i], r[2 * k], r[2 * k + 1]))
+    return out
+
+
+def _split_change(dim, rows, limit):
+    """Per-member A, B, delta for one dimension — NULL members kept, so the
+    steps always add up to the total change."""
     members = [{"name": g, "blank": g is None, "a": float(a or 0), "b": float(b or 0)} for g, a, b in rows]
     for m in members:
         m["delta"] = m["b"] - m["a"]
@@ -277,7 +291,8 @@ def explain_variance(con, workspace_id, dataset_id, *, measure=None, agg="sum", 
     if dimension is not None and dimension not in candidates:
         raise DrillError(f"cannot split by {dimension!r}")
     # score every candidate so the UI can offer "best explained by …" choices
-    splits = {d: _split_change(con, sl, d, measure, agg, pa, pb, limit) for d in candidates}
+    member_rows = _member_rows(con, sl, candidates, measure, agg, pa, pb) if candidates else {}
+    splits = {d: _split_change(d, member_rows[d], limit) for d in candidates}
     ranking = sorted(({"dimension": d, "score": s["score"], "top": s["top"]["name"] if s["top"] else None,
                        "top_delta": s["top"]["delta"] if s["top"] else 0}
                       for d, s in splits.items()), key=lambda r: r["score"], reverse=True)

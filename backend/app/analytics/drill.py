@@ -310,11 +310,7 @@ def inspect(con, workspace_id, dataset_id, *, measure=None, agg="sum", filters=N
                  "data_through": str(latest_date)[:10] if latest_date is not None else None}
 
     # ---- top contributors per dimension (skip dimensions already pinned) ----
-    contributors = []
-    for dim, dim_sub in sl.dimensions.items():
-        if dim in sl.filters:
-            continue
-        contributors.append(_split(con, sl, dim, measure, agg, vexpr, TOP_CONTRIBUTORS, value))
+    contributors = _contributors(con, sl, measure, agg, vexpr, TOP_CONTRIBUTORS, value)
 
     notes = []
     if user_id and restricts(con, workspace_id, user_id, dataset_id):
@@ -343,6 +339,81 @@ def inspect(con, workspace_id, dataset_id, *, measure=None, agg="sum", filters=N
         "additive": agg in _ADDITIVE,
         "notes": notes,
     }
+
+
+def _contributors(con, sl: _Slice, measure, agg, vexpr, limit, total) -> list[dict]:
+    """Every free dimension's split of the slice, from ONE scan.
+
+    Splitting by each dimension separately costs a scan per dimension (three
+    queries each, with the tail and the distinct count); on a 1M-row table
+    with 20 dimensions that is most of a second. GROUPING SETS computes every
+    dimension's groups in a single pass, and each group carries enough partial
+    aggregates (rows, sum, count, min, max) to rebuild any of the decomposable
+    aggregations — including the "other" tail — exactly. A median is not
+    decomposable, so it keeps the per-dimension path.
+    """
+    dims = [d for d in sl.dimensions if d not in sl.filters]
+    if not dims:
+        return []
+    if agg == "median":
+        return [_split(con, sl, d, measure, agg, vexpr, limit, total) for d in dims]
+
+    cols = [safe_identifier(d, sl.allowed) for d in dims]
+    mq = safe_identifier(measure, sl.allowed) if measure else None
+    parts = "COUNT(*)" + (f", SUM({mq}), COUNT({mq}), MIN({mq}), MAX({mq})" if mq else "")
+    flags = ", ".join(f"GROUPING({c})" for c in cols)
+    where, params, own = sl.where()
+    rows = con.execute(
+        f"SELECT {flags}, {', '.join(cols)}, {parts} FROM {sl.relation} {where} "
+        f"GROUP BY GROUPING SETS ({', '.join(f'({c})' for c in cols)})", params,
+    ).fetchall()
+
+    k = len(dims)
+    groups: dict[str, list] = {d: [] for d in dims}
+    for r in rows:
+        i = next(j for j in range(k) if r[j] == 0)       # the set this row belongs to
+        name = r[k + i]
+        if name is None:                                  # blank values are not a contributor
+            continue
+        n, s, c, lo, hi = (r[2 * k:] + (None,) * 4)[:5]
+        groups[dims[i]].append({"name": name, "rows": n, "s": s, "c": c, "lo": lo, "hi": hi})
+
+    def value_of(gs):
+        if agg == "count":
+            return sum(g["rows"] for g in gs)
+        if agg == "sum":
+            vals = [g["s"] for g in gs if g["s"] is not None]
+            return sum(vals) if vals else None
+        if agg == "avg":
+            c = sum(g["c"] or 0 for g in gs)
+            return (sum(g["s"] or 0 for g in gs) / c) if c else None
+        bound = [g["lo" if agg == "min" else "hi"] for g in gs if g["lo"] is not None]
+        return (min(bound) if agg == "min" else max(bound)) if bound else None
+
+    additive = agg in _ADDITIVE
+    share = lambda v: (round((v or 0) / total * 100, 1) if additive and total else None)  # noqa: E731
+    out = []
+    for dim, gq in zip(dims, cols):
+        gs = groups[dim]
+        for g in gs:
+            g["value"] = value_of([g])
+        gs.sort(key=lambda g: (g["value"] is None, -(g["value"] or 0), str(g["name"])))
+        shown, tail = gs[:limit], gs[limit:]
+        others = None
+        if tail:
+            ov = value_of(tail)
+            others = {"count": len(tail), "value": ov, "rows": sum(g["rows"] for g in tail), "share_pct": share(ov)}
+        dwhere, _, downs = sl.where(f"{gq} IS NOT NULL")
+        shown_sql = (f"SELECT {gq} AS name, {vexpr} AS value, COUNT(*) AS n FROM {sl.relation} {dwhere} "
+                     f"GROUP BY 1 ORDER BY value DESC NULLS LAST, name LIMIT {int(limit)}")
+        out.append({
+            "dimension": dim, "subtype": sl.dimensions.get(dim), "distinct": len(gs),
+            "items": [{"name": g["name"], "value": g["value"], "rows": g["rows"], "share_pct": share(g["value"])}
+                      for g in shown],
+            "others": others,
+            "sql": _display_sql(sl, shown_sql, downs),
+        })
+    return out
 
 
 def _split(con, sl: _Slice, dim: str, measure, agg, vexpr, limit, total) -> dict:

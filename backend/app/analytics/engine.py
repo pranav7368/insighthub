@@ -221,17 +221,17 @@ def compute_dashboard(
         for dim in dimensions:
             dcol = safe_identifier(dim.name, allowed)
             dwhere, dparams = build_where(f"{dcol} IS NOT NULL")
+            # the window totals are computed over every group before the
+            # LIMIT, so one query yields the top 20 *and* the whole they are
+            # shares of — a long tail must not inflate every share shown
             sql = f"""
-                SELECT {dcol} AS name, SUM({mcol}) AS value
-                FROM {table} {dwhere}
-                GROUP BY 1 ORDER BY value DESC NULLS LAST LIMIT 20
+                SELECT name, value, SUM(value) OVER () AS grand, COUNT(*) OVER () AS distinct_n
+                FROM (SELECT {dcol} AS name, SUM({mcol}) AS value FROM {table} {dwhere} GROUP BY 1)
+                ORDER BY value DESC NULLS LAST LIMIT 20
             """
-            rows = con.execute(sql, dparams).fetchall()
-            # shares are of the WHOLE, not of the top 20 shown — otherwise a
-            # long tail silently inflates every share on the chart
-            grand, distinct = con.execute(
-                f"SELECT SUM({mcol}), COUNT(DISTINCT {dcol}) FROM {table} {dwhere}", dparams
-            ).fetchone()
+            full = con.execute(sql, dparams).fetchall()
+            rows = [(r[0], r[1]) for r in full]
+            grand, distinct = (full[0][2], full[0][3]) if full else (None, 0)
             total = grand or sum((r[1] or 0) for r in rows) or 1
             others = None
             if distinct > len(rows):

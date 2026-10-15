@@ -18,7 +18,7 @@ Rules, in the order an analyst would raise them:
 """
 
 from ..core.sqlsafe import safe_identifier
-from .drill import DrillError, _open, _resolve_measure, _split
+from .drill import DrillError, _contributors, _open, _resolve_measure
 from .intelligence import format_value
 from .targets import list_targets
 from .variance import explain_variance, guess_volume_measure, price_volume_mix
@@ -139,10 +139,8 @@ def recommend(con, workspace_id, dataset_id, *, measure=None, filters=None, user
     where, params, _ = sl.where()
     total = con.execute(f"SELECT {vexpr} FROM {sl.relation} {where}", params).fetchone()[0]
     best = None
-    for dim in sl.dimensions:
-        if dim in sl.filters or not total:
-            continue
-        split = _split(con, sl, dim, measure, "sum", vexpr, 1, total)
+    for split in (_contributors(con, sl, measure, "sum", vexpr, 1, total) if total else []):
+        dim = split["dimension"]
         if split["items"] and split["distinct"] >= 3:
             top = split["items"][0]
             bar = max(CONCENTRATION, FAIR_SHARE_MULTIPLE * 100.0 / split["distinct"])

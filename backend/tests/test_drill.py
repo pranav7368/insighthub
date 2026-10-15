@@ -140,6 +140,37 @@ def test_bad_input_is_rejected(ds):
         inspect(con, "ws_b", dsid)
 
 
+@pytest.mark.parametrize("agg", ["sum", "avg", "count", "min", "max", "median"])
+def test_single_scan_contributors_match_the_per_dimension_path(con, agg):
+    """The GROUPING SETS fast path must give exactly what one query per
+    dimension gives — items, order, tail and distinct count — including blank
+    values (excluded) and missing measure values (ignored by the aggregate)."""
+    from app.analytics.drill import _contributors, _open, _split, _value_expr
+
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    rows = [["date", "region", "product", "revenue"]]
+    for i in range(120):
+        region = "" if i % 17 == 0 else f"R{i % 9}"
+        revenue = "" if i % 11 == 0 else str((i * 37) % 500 + 1)
+        rows.append([f"2025-{i % 12 + 1:02d}-05", region, f"P{i % 13}", revenue])
+    dsid = ingest_upload(con, "ws_a", "c.csv", _csv(rows)).dataset_id
+    sl = _open(con, "ws_a", dsid, None, {}, None, None)
+    vexpr = _value_expr(sl, "revenue", agg)
+    total = con.execute(f"SELECT {vexpr} FROM {sl.relation}").fetchone()[0]
+    fast = {c["dimension"]: c for c in _contributors(con, sl, "revenue", agg, vexpr, 5, total)}
+    for dim in ("region", "product"):
+        slow = _split(con, sl, dim, "revenue", agg, vexpr, 5, total)
+        got = fast[dim]
+        assert got["distinct"] == slow["distinct"]
+        assert [i["name"] for i in got["items"]] == [i["name"] for i in slow["items"]]
+        for a, b in zip(got["items"], slow["items"]):
+            assert a["value"] == pytest.approx(b["value"]) and a["rows"] == b["rows"]
+            assert a["share_pct"] == b["share_pct"]
+        assert got["others"]["count"] == slow["others"]["count"]
+        assert got["others"]["rows"] == slow["others"]["rows"]
+        assert got["others"]["value"] == pytest.approx(slow["others"]["value"])
+
+
 # ----------------------------------------------------------- breakdown ---
 
 def test_breakdown_folds_the_tail_into_others(ds):

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getExplain, getScatter, getTargets, listMetrics, listViews, updateView } from "../api";
 import { exportPdf, exportPng } from "../export";
 import KpiCard from "./KpiCard";
@@ -22,16 +22,18 @@ import CertifiedMetrics from "./CertifiedMetrics";
 import DriverAnalysis from "./DriverAnalysis";
 import ViewsBar from "./ViewsBar";
 import DashSection from "./DashSection";
-import Inspector from "./Inspector";
 import DecompositionTree from "./DecompositionTree";
 import ActionsPanel from "./ActionsPanel";
-import CommandPalette from "./CommandPalette";
 import DataMenu from "./DataMenu";
 import { mappableFraction } from "../geo";
 import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections";
 import { buildUrlSearch, makeCtx, readUrlState, targetFor } from "../drill";
 import { buildCommands } from "../palette";
 import { humanLabel } from "../format";
+
+// opened on demand, so their code is fetched on first use
+const Inspector = lazy(() => import("./Inspector"));
+const CommandPalette = lazy(() => import("./CommandPalette"));
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
 
@@ -591,6 +593,7 @@ export default function DashboardView({ datasetId, canEdit = false }) {
         ))}
       </div>
 
+      <Suspense fallback={inspectCtx ? <aside className="inspector"><div className="skeleton skeleton--hero" /></aside> : null}>
       {inspectCtx && (
         <Inspector datasetId={datasetId} ctx={inspectCtx}
           onNavigate={navigateInspect} onClose={closeInspect} onApply={applyInspect}
@@ -598,6 +601,7 @@ export default function DashboardView({ datasetId, canEdit = false }) {
       )}
       {menu && <DataMenu {...menu} onClose={closeMenu} />}
       {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
+      </Suspense>
     </div>
   );
 }
