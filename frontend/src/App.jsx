@@ -52,6 +52,7 @@ export default function App() {
   const [showSecurity, setShowSecurity] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
+  const [alertPreset, setAlertPreset] = useState(null);   // e.g. "alert me if this target falls behind"
   const [showMetrics, setShowMetrics] = useState(false);
   const [showJoin, setShowJoin] = useState(false);
   const [showTeam, setShowTeam] = useState(false);
@@ -244,7 +245,8 @@ export default function App() {
               )}
             </div>
           ) : (
-            datasetId && <DashboardView key={`${datasetId}-${dashboardKey}`} datasetId={datasetId} canEdit={canEdit} />
+            datasetId && <DashboardView key={`${datasetId}-${dashboardKey}`} datasetId={datasetId} canEdit={canEdit}
+              onRequestAlert={(preset) => { setAlertPreset(preset); setShowAlerts(true); }} />
           )
         )}
         <Suspense fallback={<div className="empty-panel">Loading…</div>}>
@@ -271,7 +273,8 @@ export default function App() {
         <ShareDialog datasetId={datasetId} onClose={() => setShowShare(false)} />
       )}
       {showAlerts && datasetId && (
-        <AlertsDialog datasetId={datasetId} onClose={() => setShowAlerts(false)} />
+        <AlertsDialog datasetId={datasetId} preset={alertPreset}
+          onClose={() => { setShowAlerts(false); setAlertPreset(null); }} />
       )}
       {showMetrics && datasetId && (
         <MetricsDialog

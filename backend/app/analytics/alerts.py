@@ -2,7 +2,7 @@
 line.
 
 An alert names a measure, an aggregate (total / latest period / month-over-month
-%), a comparator, and a threshold. It is evaluated on a schedule; the value is
+% / pace against the current target), a comparator, and a threshold. It is evaluated on a schedule; the value is
 computed deterministically from the data (never an LLM), and the webhook fires
 only on the transition *into* 'firing' (re-arms on return to 'ok') so a lasting
 condition doesn't spam. The webhook URL passes the shared SSRF guard, so an
@@ -17,7 +17,9 @@ from ..core.sqlsafe import safe_identifier, safe_table_name
 from .engine import get_columns, get_dataset
 from .rls import secured_relation
 
-AGGREGATES = ("total", "latest", "mom_pct")
+AGGREGATES = ("total", "latest", "mom_pct", "target_pace")
+# when several targets cover today, the one an operator acts on first
+_TARGET_GRAIN_ORDER = ("month", "week", "quarter", "year", "day")
 OPS = {"lt": operator.lt, "lte": operator.le, "gt": operator.gt, "gte": operator.ge}
 _OP_TEXT = {"lt": "<", "lte": "≤", "gt": ">", "gte": "≥"}
 MAX_NAME = 120
@@ -134,6 +136,12 @@ def _compute_value(con, workspace_id: str, dataset_id: str, measure: str, aggreg
         v = con.execute(f"SELECT sum({mq}) FROM {tq}", list(rls_params)).fetchone()[0]
         return None if v is None else float(v)
 
+    if aggregate == "target_pace":
+        target = current_target(con, workspace_id, dataset_id, measure, user_id)
+        if target["projected_ratio"] is None:
+            raise AlertError("the current target is zero, so there is no pace to measure")
+        return target["projected_ratio"] * 100.0
+
     date_col = next((c.name for c in cols if c.role == "date"), None)
     if not date_col:
         raise AlertError("this alert needs a date column")
@@ -159,13 +167,43 @@ def _compute_value(con, workspace_id: str, dataset_id: str, measure: str, aggreg
     return (float(last) - float(prev)) / float(prev) * 100.0
 
 
-def _message(alert: dict, value: float) -> dict:
-    unit = "%" if alert["aggregate"] == "mom_pct" else ""
+def current_target(con, workspace_id: str, dataset_id: str, measure: str, user_id: str | None = None) -> dict:
+    """The whole-dataset target for `measure` whose period contains the data's
+    last date, evaluated for `user_id` (their row rules apply to the actual)."""
+    from .targets import list_targets
+
+    current = [t for t in list_targets(con, workspace_id, dataset_id, user_id)
+               if t.get("measure") == measure and not t.get("filters") and t.get("current")
+               and t.get("status") != "broken"]
+    if not current:
+        raise AlertError("no target covers the current period — set one first")
+    current.sort(key=lambda t: _TARGET_GRAIN_ORDER.index(t["grain"]))
+    return current[0]
+
+
+def _message(alert: dict, value: float, target: dict | None = None) -> dict:
+    unit = "%" if alert["aggregate"] in ("mom_pct", "target_pace") else ""
     pretty = f"{value:,.2f}{unit}"
-    what = {"total": "total", "latest": "latest-period", "mom_pct": "month-over-month change of"}[alert["aggregate"]]
+    what = {"total": "total", "latest": "latest-period", "mom_pct": "month-over-month change of",
+            "target_pace": "pace against target for"}[alert["aggregate"]]
     text = (f"🔔 InsightHub alert — {alert['name']}: {what} {alert['measure']} is {pretty} "
             f"(threshold {_OP_TEXT[alert['op']]} {alert['threshold']:g}).")
+    extra = {}
+    if target:
+        # say what the number means and what it would take — the reader of a
+        # Slack message should not have to open the app to act on it
+        text = (f"🔔 InsightHub alert — {alert['name']}: {alert['measure']} is on pace for "
+                f"{target['projection']:,.0f} against a {target['period']} target of {target['value']:,.0f} "
+                f"({value:.0f}%, alert {_OP_TEXT[alert['op']]} {alert['threshold']:g}%). "
+                f"{target['actual']:,.0f} so far after {target['days_elapsed']} of {target['days']} days")
+        if target["needed_per_day"] > 0:
+            text += f"; the remaining {target['days_remaining']} days need {target['needed_per_day']:,.0f} a day."
+        else:
+            text += "."
+        extra = {"target": {k: target[k] for k in ("period", "grain", "value", "actual", "projection",
+                                                     "days_remaining", "needed_per_day", "status")}}
     return {
+        **extra,
         "type": "insighthub.alert",
         "alert": alert["name"],
         "dataset_id": alert["dataset_id"],
@@ -206,8 +244,10 @@ def evaluate_alert(con, workspace_id: str, alert_id: str, deliver: bool = True) 
     error = None
     if fired_now and deliver and alert["enabled"]:
         try:
-            _post(alert, _message(alert, value))
-        except (nettrust.BlockedURLError, nettrust.FetchError) as exc:
+            target = (current_target(con, workspace_id, alert["dataset_id"], alert["measure"], alert.get("created_by"))
+                      if alert["aggregate"] == "target_pace" else None)
+            _post(alert, _message(alert, value, target))
+        except (nettrust.BlockedURLError, nettrust.FetchError, AlertError) as exc:
             error = f"delivery failed: {exc}"
 
     con.execute(

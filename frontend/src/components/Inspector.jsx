@@ -283,7 +283,7 @@ function Proof({ data }) {
  * clicking another chart simply re-targets the drawer.
  */
 export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply,
-  targets = [], canEdit = false, onTargetsChanged }) {
+  targets = [], canEdit = false, onTargetsChanged, onRequestAlert }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -393,7 +393,7 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
                   const target = targetFor(targets, slice);
                   return {
                     targetKey: target?.target_id || "new", datasetId, ctx: slice, target, subtype: data.subtype,
-                    lastDate: data.trend.data_through, canEdit, onChanged: onTargetsChanged,
+                    lastDate: data.trend.data_through, canEdit, onChanged: onTargetsChanged, onRequestAlert,
                   };
                 })() : null} />
             )}

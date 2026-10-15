@@ -6,7 +6,7 @@ import { TARGET_STATUS, currentPeriod } from "../drill";
 const GRAIN_LABEL = { month: "Month", quarter: "Quarter", year: "Year" };
 
 /** Progress against the slice's target, and (for editors) setting one. */
-export default function TargetPanel({ datasetId, ctx, target, subtype, lastDate, canEdit, onChanged }) {
+export default function TargetPanel({ datasetId, ctx, target, subtype, lastDate, canEdit, onChanged, onRequestAlert }) {
   const [editing, setEditing] = useState(false);
   const [grain, setGrain] = useState(target?.grain && GRAIN_LABEL[target.grain] ? target.grain : "month");
   const [period, setPeriod] = useState(target?.period || currentPeriod(lastDate, "month") || "");
@@ -69,6 +69,14 @@ export default function TargetPanel({ datasetId, ctx, target, subtype, lastDate,
                     <b>{formatNumber(target.projection, subtype)}</b> ({Math.round(target.projected_ratio * 100)}%).</>
                 )}
               </p>
+              {canEdit && onRequestAlert && target.current && Object.keys(target.filters || {}).length === 0 && (
+                <button className="link-btn target__alert" onClick={() => onRequestAlert({
+                  aggregate: "target_pace", measure: target.measure, op: "lt", threshold: 90,
+                  name: `${humanLabel(target.measure)} falling behind target`,
+                })}>
+                  Alert me if this falls behind ›
+                </button>
+              )}
               {target.needed_per_day > 0 && (
                 <p className="insp-caption">
                   To hit it, the remaining {target.days_remaining} days need {formatNumber(target.needed_per_day, subtype)} a day.

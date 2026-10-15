@@ -58,7 +58,7 @@ function initialFromUrl(datasetId) {
   return owns ? s : null;
 }
 
-export default function DashboardView({ datasetId, canEdit = false }) {
+export default function DashboardView({ datasetId, canEdit = false, onRequestAlert }) {
   const [fromUrl] = useState(() => initialFromUrl(datasetId));
   const [dashboard, setDashboard] = useState(null);
   const [activeMeasure, setActiveMeasure] = useState(fromUrl?.measure || null);
@@ -597,7 +597,7 @@ export default function DashboardView({ datasetId, canEdit = false }) {
       {inspectCtx && (
         <Inspector datasetId={datasetId} ctx={inspectCtx}
           onNavigate={navigateInspect} onClose={closeInspect} onApply={applyInspect}
-          targets={targets} canEdit={canEdit} onTargetsChanged={targetsChanged} />
+          targets={targets} canEdit={canEdit} onTargetsChanged={targetsChanged} onRequestAlert={onRequestAlert} />
       )}
       {menu && <DataMenu {...menu} onClose={closeMenu} />}
       {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}

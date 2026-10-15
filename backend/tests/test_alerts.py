@@ -156,3 +156,46 @@ def test_alerts_workspace_scoped(ds, allow_private, webhook):
     with pytest.raises(AlertNotFound):
         set_enabled(con, "ws_b", a["alert_id"], False)
     assert delete_alert(con, "ws_b", a["alert_id"]) == 0
+
+
+# ------------------------------------------------------- target pace ------
+
+def test_target_pace_alert_fires_with_what_it_would_take(ds, allow_private, webhook):
+    """Feb's data ends on the 6th: 900 so far -> run rate 900/6*28 = 4200. A
+    5000 target is at 84% pace — below a 90% alert line, so it fires once and
+    the message says what the remaining days need."""
+    from app.analytics.targets import set_target
+
+    con, ws, dsid = ds
+    server, url = webhook
+    a = create_alert(con, ws, dsid, "Feb revenue pace", "revenue", "target_pace", "lt", 90, url)
+    # no target yet: an error the UI can show, not a silent pending
+    r0 = evaluate_alert(con, ws, a["alert_id"])
+    assert r0["state"] == "error" and "set one first" in r0["error"]
+
+    set_target(con, ws, dsid, measure="revenue", grain="month", period="2025-02", value=5000)
+    r1 = evaluate_alert(con, ws, a["alert_id"])
+    assert r1["state"] == "firing" and r1["value"] == pytest.approx(4200 / 5000 * 100)
+    post = server.posts[0]
+    assert post["target"]["period"] == "2025-02" and post["target"]["projection"] == pytest.approx(4200)
+    assert "on pace for 4,200 against a 2025-02 target of 5,000 (84%" in post["text"]
+    assert "the remaining 22 days need 186 a day" in post["text"]
+
+    # raising the pace (a lower target) re-arms it
+    set_target(con, ws, dsid, measure="revenue", grain="month", period="2025-02", value=4000)
+    assert evaluate_alert(con, ws, a["alert_id"])["state"] == "ok"
+    assert len(server.posts) == 1
+
+
+def test_target_pace_prefers_the_month_and_ignores_segment_targets(ds):
+    from app.analytics.alerts import current_target
+    from app.analytics.targets import set_target
+
+    con, ws, dsid = ds
+    set_target(con, ws, dsid, measure="revenue", grain="quarter", period="2025-Q1", value=10000)
+    set_target(con, ws, dsid, measure="revenue", grain="month", period="2025-02", value=5000,
+               filters={"branch": "Delhi"})
+    assert current_target(con, ws, dsid, "revenue")["grain"] == "quarter"
+    set_target(con, ws, dsid, measure="revenue", grain="month", period="2025-02", value=5000)
+    assert current_target(con, ws, dsid, "revenue")["grain"] == "month"
+    assert _compute_value(con, ws, dsid, "revenue", "target_pace") == pytest.approx(84.0)

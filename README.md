@@ -47,7 +47,7 @@ Most "AI + BI" tools hallucinate numbers. InsightHub is built so they can't:
 | **Saved views** | Save the current dashboard state (filters, date range, chosen measure) **and** which sections are shown **and the order they appear in** as a named **view**; switch between views, set a **default** that auto-loads, and hide/show any section from a **Customize** menu. |
 | **Drag to rearrange** | **Arrange** mode turns every dashboard section into a draggable tile — drag it, nudge it with ↑ ↓, or hide it, then save the layout into a view. Shared links reproduce the arrangement their author saved. |
 | **Share** | Create a **revocable, read-only public link** to a dashboard (optionally pinned to a saved view, optionally expiring) — anyone can open it, no account needed. Backed by an unguessable 192-bit capability token. |
-| **Alerts** | Watch a measure (total / latest month / month-over-month %) and **POST to a webhook** (Slack, Teams, Discord, any URL) when it crosses a threshold. Checked on a schedule; fires only on the transition into "firing" (no spam) and re-arms when it recovers. Webhook URLs are SSRF-guarded. |
+| **Alerts** | Watch a measure (total / latest month / month-over-month % / **pace against the current target**) and **POST to a webhook** (Slack, Teams, Discord, any URL) when it crosses a threshold. Checked on a schedule; fires only on the transition into "firing" (no spam) and re-arms when it recovers. Webhook URLs are SSRF-guarded. A target alert ("alert me if this falls behind", one click from any target) fires when the run rate projects missing the target by more than your margin, and the message says what the remaining days need per day. |
 | **Export** | One-click **PDF** and **PNG** of the dashboard, and **CSV** of the underlying data. |
 | **Team & roles** | Invite teammates with a role — **admin** (full control + team management), **editor** (edit data & dashboards), **viewer** (read-only). Content mutations require editor+; user management is admin-only. Invites get a one-time password; members can change their own. |
 | **Billing & plans** | Optional (`IH_BILLING_ENABLED`) free/pro plan gating with per-workspace quotas (datasets / members / alerts) enforced at the create points (`402` on limit). Stripe checkout + webhook-driven subscription state, or set the plan manually for self-hosted. Off by default = unlimited. |
@@ -174,7 +174,7 @@ backend/
                             drill · variance · targets · actions · metrictree (drill-down + analyst layer)
     qa/                     llm (multi-provider + offline) · engine · gates
     prompts/                reviewable plain-text LLM prompts
-  tests/                    552 tests (pytest)
+  tests/                    560 tests (pytest)
   scripts/make_sample_data.py
 frontend/
   src/
@@ -187,7 +187,7 @@ run.sh · run.ps1 · .env.example
 
 ```bash
 cd backend
-IH_OFFLINE=1 .venv/Scripts/python -m pytest -q     # 552 tests (4 need Postgres)
+IH_OFFLINE=1 .venv/Scripts/python -m pytest -q     # 560 tests (4 need Postgres)
 ```
 
 Covers: SQL-injection defense, tenant isolation, per-format ingestion,
@@ -197,7 +197,7 @@ text-to-query (grounded), the citation gates, the narrative number gate, and
 multi-provider LLM dispatch, drill-down and variance maths (every waterfall
 reconciles, price/volume/mix adds up), targets, recommended actions, and row
 rules + masking on every drill path over HTTP. LLM calls are mocked or offline
-throughout. Frontend: `cd frontend && npm test` (128 tests, incl. axe checks).
+throughout. Frontend: `cd frontend && npm test` (131 tests, incl. axe checks).
 
 ## Sample data
 
