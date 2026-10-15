@@ -249,6 +249,26 @@ export const revokeShare = (token) =>
 export const getPublicDashboard = (token) =>
   client.get(`/public/${token}/dashboard`).then((r) => r.data);
 
+// Drill-down on a share link: aggregates only, clamped server-side to what the
+// link shares (its filters and dates), always masked.
+export const getPublicInspect = (token, s) =>
+  client.get(`/public/${token}/inspect`, {
+    params: { ...sliceParams(s), measure: s.measure || undefined, agg: s.agg || "sum", grain: s.grain || "month" },
+  }).then((r) => r.data);
+
+export const getPublicBreakdown = (token, s, dimension, limit = 50) =>
+  client.get(`/public/${token}/breakdown`, {
+    params: { ...sliceParams(s), dimension, limit, measure: s.measure || undefined, agg: s.agg || "sum" },
+  }).then((r) => r.data);
+
+export const getPublicVariance = (token, s, { dimension, limit } = {}) =>
+  client.get(`/public/${token}/variance`, {
+    params: {
+      ...sliceParams(s), measure: s.measure || undefined, agg: s.agg || "sum", grain: s.grain || "month",
+      compare: s.compare || "previous", dimension: dimension || undefined, limit,
+    },
+  }).then((r) => r.data);
+
 // --- Threshold alerts (webhook delivery) ---
 export const listAlerts = (datasetId) =>
   client.get(`/datasets/${datasetId}/alerts`).then((r) => r.data);

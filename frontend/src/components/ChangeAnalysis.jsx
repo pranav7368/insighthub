@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { errorText, getPvm, getVariance } from "../api";
+import { errorText } from "../api";
+import { useDrillApi } from "../drillApi";
 import { formatNumber, humanLabel } from "../format";
 import { drillInto, pctText } from "../drill";
 import Waterfall from "./Waterfall";
@@ -47,7 +48,8 @@ function PriceVolumeMix({ datasetId, ctx, measures }) {
   const [volume, setVolume] = useState(null);
   const [dimension, setDimension] = useState(null);
   const key = JSON.stringify([datasetId, ctx.measure, ctx.filters, ctx.date_from, ctx.date_to, ctx.grain, ctx.compare, volume, dimension]);
-  const { data, error, loading } = useFetch(() => getPvm(datasetId, ctx, { volume, dimension }), key);
+  const drillApi = useDrillApi();
+  const { data, error, loading } = useFetch(() => drillApi.pvm(datasetId, ctx, { volume, dimension }), key);
   const volumeChoices = measures.filter((m) => m.name !== ctx.measure);
 
   if (error && !volume) {
@@ -135,10 +137,11 @@ function PriceVolumeMix({ datasetId, ctx, measures }) {
 
 /** "Why it changed": A vs B, reconciled step by step. */
 export default function ChangeAnalysis({ datasetId, ctx, go, measures }) {
+  const drillApi = useDrillApi();
   const compare = ctx.compare || "previous";
   const key = JSON.stringify([datasetId, ctx.measure, ctx.agg, ctx.filters, ctx.date_from, ctx.date_to, ctx.grain, compare, ctx.dimension]);
   const { data, error, loading } = useFetch(
-    () => getVariance(datasetId, { ...ctx, compare }, { dimension: ctx.dimension || undefined }), key);
+    () => drillApi.variance(datasetId, { ...ctx, compare }, { dimension: ctx.dimension || undefined }), key);
 
   const head = (
     <div className="insp-block__head">
@@ -229,7 +232,9 @@ export default function ChangeAnalysis({ datasetId, ctx, go, measures }) {
         </section>
       )}
 
-      {ctx.agg === "sum" && measures.length > 1 && <PriceVolumeMix datasetId={datasetId} ctx={ctx} measures={measures} />}
+      {ctx.agg === "sum" && measures.length > 1 && drillApi.pvm && (
+        <PriceVolumeMix datasetId={datasetId} ctx={ctx} measures={measures} />
+      )}
     </>
   );
 }

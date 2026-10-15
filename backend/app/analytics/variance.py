@@ -269,8 +269,8 @@ def _split_change(dim, rows, limit):
 
 def explain_variance(con, workspace_id, dataset_id, *, measure=None, agg="sum", filters=None,
                      date_from=None, date_to=None, grain="month", compare="previous",
-                     dimension=None, limit=8, user_id=None) -> dict:
-    sl = _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to)
+                     dimension=None, limit=8, user_id=None, public=False) -> dict:
+    sl = _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to, public)
     if agg not in _ADDITIVE:
         raise DrillError("a change can only be broken into parts for a total or a count")
     measure = _resolve_measure(sl, measure, agg)
@@ -366,8 +366,8 @@ def guess_volume_measure(measures: dict, value_measure: str | None) -> str | Non
 
 def price_volume_mix(con, workspace_id, dataset_id, *, measure=None, volume=None, filters=None,
                      date_from=None, date_to=None, grain="month", compare="previous",
-                     dimension=None, limit=8, user_id=None) -> dict:
-    sl = _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to)
+                     dimension=None, limit=8, user_id=None, public=False) -> dict:
+    sl = _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to, public)
     measure = _resolve_measure(sl, measure, "sum")
     if measure not in sl.measures:
         raise DrillError(f"{measure!r} is not a numeric measure")

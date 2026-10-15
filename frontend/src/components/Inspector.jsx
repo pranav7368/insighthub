@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { errorText, getBreakdown, getInspect } from "../api";
+import { errorText } from "../api";
+import { useDrillApi } from "../drillApi";
 import { formatNumber, humanLabel } from "../format";
 import {
   AGG_LABELS, GRAINS, crumbs, drillInto, drillPeriod, pctText, targetFor, truncateCtx,
@@ -13,10 +14,11 @@ import TargetPanel from "./TargetPanel";
 const TABS = [
   { key: "overview", label: "Overview" },
   // only for a total/count over dated data — the only kind a change can be split into parts
-  { key: "change", label: "Why it changed", when: (d) => d.trend && d.additive },
+  { key: "change", label: "Why it changed", when: (d, api) => d.trend && d.additive && api.variance },
   { key: "breakdown", label: "Breakdown" },
-  { key: "records", label: "Records" },
-  { key: "ask", label: "Ask" },
+  // row-level and free-form: never on a share link
+  { key: "records", label: "Records", when: (d, api) => api.mode === "member" },
+  { key: "ask", label: "Ask", when: (d, api) => api.mode === "member" },
   { key: "proof", label: "How it's calculated" },
 ];
 
@@ -179,6 +181,7 @@ function Overview({ data, ctx, go, targetProps }) {
 }
 
 function BreakdownTab({ datasetId, data, ctx, go }) {
+  const drillApi = useDrillApi();
   const dims = data.dimensions.filter((d) => !d.pinned);
   const dim = dims.some((d) => d.name === ctx.dimension) ? ctx.dimension : dims[0]?.name;
   const [limit, setLimit] = useState(50);
@@ -191,7 +194,7 @@ function BreakdownTab({ datasetId, data, ctx, go }) {
     if (!dim) return;
     let live = true;
     setError(null);
-    getBreakdown(datasetId, ctx, dim, limit)
+    drillApi.breakdown(datasetId, ctx, dim, limit)
       .then((d) => { if (live) setBd(d); })
       .catch((e) => { if (live) setError(errorText(e, "Could not load the breakdown.")); });
     return () => { live = false; };
@@ -284,6 +287,7 @@ function Proof({ data }) {
  */
 export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply,
   targets = [], canEdit = false, onTargetsChanged, onRequestAlert }) {
+  const drillApi = useDrillApi();
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -294,7 +298,7 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
     let live = true;
     setError(null);
     setLoading(true);
-    getInspect(datasetId, ctx)
+    drillApi.inspect(datasetId, ctx)
       .then((d) => { if (live) setData(d); })
       .catch((e) => { if (live) setError(errorText(e, "Could not open this number.")); })
       .finally(() => { if (live) setLoading(false); });
@@ -314,9 +318,9 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
   const trail = crumbs(ctx);
   const sub = data?.subtype;
   const cmp = data?.trend?.comparison;
-  const tabs = TABS.filter((t) => !t.when || (data && t.when(data)));
+  const tabs = TABS.filter((t) => !t.when || (data && t.when(data, drillApi)));
   const tab = tabs.some((t) => t.key === ctx.tab) ? ctx.tab : "overview";
-  const explain = data?.trend && data?.additive
+  const explain = data?.trend && data?.additive && drillApi.variance
     ? (compare) => go({ ...ctx, tab: "change", compare }, true) : null;
 
   return (
@@ -405,8 +409,10 @@ export default function Inspector({ datasetId, ctx, onNavigate, onClose, onApply
           </div>
 
           <div className="inspector__foot">
-            <button className="views-btn views-btn--accent" onClick={() => onApply(ctx)}>Show this on the dashboard</button>
-            {tab !== "records" && <button className="views-btn" onClick={() => go({ ...ctx, tab: "records" }, true)}>See the rows</button>}
+            {onApply && <button className="views-btn views-btn--accent" onClick={() => onApply(ctx)}>Show this on the dashboard</button>}
+            {tab !== "records" && drillApi.mode === "member" && (
+              <button className="views-btn" onClick={() => go({ ...ctx, tab: "records" }, true)}>See the rows</button>
+            )}
           </div>
         </>
       )}

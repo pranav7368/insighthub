@@ -115,6 +115,7 @@ def compute_dashboard(
     date_to: str | None = None,
     breakdown_measure: str | None = None,
     user_id: str | None = None,
+    public: bool = False,
 ) -> dict:
     """`user_id` is the member the numbers are computed *for*: their row-level
     rules narrow every query below. None means unrestricted — correct for
@@ -128,7 +129,7 @@ def compute_dashboard(
 
     columns = get_columns(con, workspace_id, dataset_id)
     allowed = {c.name for c in columns}                    # the injection whitelist
-    table, rls_params = secured_relation(con, workspace_id, user_id, dataset)
+    table, rls_params = secured_relation(con, workspace_id, user_id, dataset, public=public)
 
     measures = [c for c in columns if c.role == "measure"]
     dimensions = [c for c in columns if c.role == "dimension"]

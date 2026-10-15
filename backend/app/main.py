@@ -24,7 +24,7 @@ from .analytics.views import (
     ViewError, ViewNotFound, create_view, delete_view, list_views, update_view,
 )
 from .analytics.sharing import (
-    ShareError, ShareNotFound, create_share, list_shares,
+    ShareError, ShareNotFound, create_share, list_shares, scope_to_share,
     resolve_share_dashboard_config, revoke_share,
 )
 from .analytics.alerts import (
@@ -1137,13 +1137,71 @@ def public_dashboard(token: str):
             date_from=cfg.get("date_from"), date_to=cfg.get("date_to"),
             breakdown_measure=cfg.get("measure"),
             user_id=author_id,          # a link shows only what its author could see
+            public=True,                # ...and anonymous readers always get masked PII
         )
     except DatasetNotFound:
         raise HTTPException(status_code=404, detail="this dashboard is no longer available")
     return {"dashboard": dash, "meta": {
         "hidden_sections": cfg.get("hidden_sections", []),
         "section_order": cfg.get("section_order", []),
+        "date_limited": bool(cfg.get("date_from") or cfg.get("date_to")),
     }}
+
+
+# Drill-down on a share link: aggregates only. Raw rows, CSV export, Ask,
+# targets and actions stay behind sign-in. Every request is evaluated as the
+# link's author (their row rules), always masked, and clamped to the link's
+# own filters and dates — a visitor can narrow what was shared, never widen it.
+
+def _public_drill(fn, token: str, filters: str | None, date_from, date_to, **kwargs):
+    con = db.connect()
+    try:
+        workspace_id, dataset_id, cfg, author_id = resolve_share_dashboard_config(con, token)
+    except ShareNotFound:
+        raise HTTPException(status_code=404, detail="this link is invalid or has expired")
+    try:
+        scoped, date_from, date_to = scope_to_share(cfg, parse_filters(filters), date_from, date_to)
+    except (ShareError, DrillError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    try:
+        return fn(con, workspace_id, dataset_id, filters=scoped, date_from=date_from, date_to=date_to,
+                  user_id=author_id, public=True, **kwargs)
+    except DatasetNotFound:
+        raise HTTPException(status_code=404, detail="this dashboard is no longer available")
+    except (DrillError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/public/{token}/inspect")
+def public_inspect(token: str, measure: str | None = None, agg: str = "sum", filters: str | None = None,
+                   date_from: str | None = None, date_to: str | None = None, grain: str = "month"):
+    return _public_drill(drill_inspect, token, filters, date_from, date_to,
+                         measure=measure, agg=agg, grain=grain)
+
+
+@app.get("/api/public/{token}/breakdown")
+def public_breakdown(token: str, dimension: str, measure: str | None = None, agg: str = "sum",
+                     filters: str | None = None, date_from: str | None = None, date_to: str | None = None,
+                     limit: int = 50):
+    return _public_drill(drill_breakdown, token, filters, date_from, date_to,
+                         dimension=dimension, measure=measure, agg=agg, limit=limit)
+
+
+@app.get("/api/public/{token}/variance")
+def public_variance(token: str, measure: str | None = None, agg: str = "sum", filters: str | None = None,
+                    date_from: str | None = None, date_to: str | None = None, grain: str = "month",
+                    compare: str = "previous", dimension: str | None = None, limit: int = 8):
+    con = db.connect()
+    try:
+        _, _, cfg, _ = resolve_share_dashboard_config(con, token)
+    except ShareNotFound:
+        raise HTTPException(status_code=404, detail="this link is invalid or has expired")
+    if cfg.get("date_from") or cfg.get("date_to"):
+        # comparing with the previous period would read rows outside the dates
+        # the author chose to share
+        raise HTTPException(status_code=400, detail="change analysis is not available on a date-limited link")
+    return _public_drill(explain_variance, token, filters, date_from, date_to, measure=measure, agg=agg,
+                         grain=grain, compare=compare, dimension=dimension, limit=limit)
 
 
 # ------------------------------------------------- threshold alerts ------

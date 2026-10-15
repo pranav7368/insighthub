@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { getPublicDashboard } from "../api";
 import { exportPdf, exportPng } from "../export";
 import { mappableFraction } from "../geo";
@@ -16,14 +16,21 @@ import CorrelationHeatmap from "./CorrelationHeatmap";
 import ScatterPlot from "./ScatterChart";
 import DistributionCard from "./DistributionCard";
 import DataProfile from "./DataProfile";
+import { DrillApiContext, publicDrillApi } from "../drillApi";
+import { makeCtx } from "../drill";
 
+const Inspector = lazy(() => import("./Inspector"));
 const noop = () => {};
 
 export default function PublicDashboard({ token }) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [exporting, setExporting] = useState(null);
+  // the details panel a visitor drills in; scoped server-side to the link
+  const [inspectCtx, setInspectCtx] = useState(null);
   const contentRef = useRef(null);
+  const drillApi = useMemo(
+    () => publicDrillApi(token, { changeAnalysis: !data?.meta?.date_limited }), [token, data]);
 
   useEffect(() => {
     getPublicDashboard(token)
@@ -54,6 +61,10 @@ export default function PublicDashboard({ token }) {
   if (!data) return <div className="public-shell"><div className="empty-panel">Loading…</div></div>;
 
   const dashboard = data.dashboard;
+  // the visitor's drill starts from the shared dashboard; the link's own
+  // filters and dates are added (and enforced) by the server on every call
+  const inspect = (partial) => setInspectCtx(makeCtx({ measure: dashboard.chosen_measure, ...partial }));
+  const inspectValue = (dim, value) => value != null && inspect({ filters: { [dim]: String(value) } });
   const hidden = data.meta?.hidden_sections || [];
   const show = (k) => !hidden.includes(k);
   const measure = dashboard.chosen_measure;
@@ -72,18 +83,27 @@ export default function PublicDashboard({ token }) {
         node: (
           <div className="kpi-row">
             {dashboard.kpis.map((kpi) => (
-              <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure} onSelect={noop} />
+              <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
+                onSelect={() => inspect({ measure: kpi.column })} />
             ))}
           </div>
         ),
       },
       { key: "growth", node: <GrowthStrip growth={dashboard.growth} measure={measure} /> },
-      { key: "insights", node: <InsightsPanel insights={dashboard.insights} /> },
+      {
+        key: "insights",
+        node: <InsightsPanel insights={dashboard.insights} onInvestigate={(d) => inspect({
+          measure: d.measure || measure, filters: d.filters || {},
+          ...(d.period ? { date_from: d.period, date_to: d.period } : {}),
+          ...(d.dimension ? { tab: "breakdown", dimension: d.dimension } : {}),
+        })} />,
+      },
       {
         key: "forecast",
         node: measure && (
           <ForecastChart measure={measure} subtype={subtypeOf(measure)}
-            forecast={dashboard.forecasts?.[measure]} anomalies={dashboard.anomalies?.[measure]} />
+            forecast={dashboard.forecasts?.[measure]} anomalies={dashboard.anomalies?.[measure]}
+            onPeriod={(period) => inspect({ date_from: period, date_to: period })} />
         ),
       },
       {
@@ -92,11 +112,13 @@ export default function PublicDashboard({ token }) {
           <div className="chart-grid">
             {Object.entries(dashboard.breakdowns).map(([dim, bd]) => (
               <BreakdownChart key={dim} dimensionName={dim} breakdown={bd}
-                measure={measure} subtype={subtypeOf(measure)} onSelect={noop} />
+                measure={measure} subtype={subtypeOf(measure)} onSelect={inspectValue}
+                onShowAll={(d) => inspect({ tab: "breakdown", dimension: d })} />
             ))}
             {Object.entries(dashboard.breakdowns).slice(0, 1).map(([dim, bd]) => (
               <ContributionDonut key={`donut-${dim}`} dimensionName={dim} breakdown={bd}
-                subtype={subtypeOf(measure)} onSelect={noop} />
+                subtype={subtypeOf(measure)} onSelect={inspectValue}
+                onShowAll={(d) => inspect({ tab: "breakdown", dimension: d })} />
             ))}
           </div>
         ),
@@ -111,7 +133,7 @@ export default function PublicDashboard({ token }) {
       {
         key: "pareto",
         node: dashboard.pareto && dashboard.pareto.total_categories > 2 && (
-          <ParetoChart pareto={dashboard.pareto} />
+          <ParetoChart pareto={dashboard.pareto} onSelect={inspectValue} />
         ),
       },
       {
@@ -174,6 +196,15 @@ export default function PublicDashboard({ token }) {
 
         {sections.map(({ key, node }) => <div className="dash-section" key={key}>{node}</div>)}
       </div>
+
+      <DrillApiContext.Provider value={drillApi}>
+        <Suspense fallback={null}>
+          {inspectCtx && (
+            <Inspector datasetId={dashboard.dataset?.dataset_id} ctx={inspectCtx}
+              onNavigate={(next) => setInspectCtx(next)} onClose={() => setInspectCtx(null)} />
+          )}
+        </Suspense>
+      </DrillApiContext.Provider>
 
       <footer className="public-footer">
         Built with <b>InsightHub</b> — every number computed from the data, never invented.

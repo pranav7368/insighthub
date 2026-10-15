@@ -17,7 +17,8 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Tenant isolation** | `workspace_id` comes from the verified JWT and is never accepted from client input; every query is scoped by it | `api/deps.py` |
 | **SQL injection defence** | Identifiers are whitelisted against the dataset's real columns and quoted; values are always bound parameters. No user text is ever formatted into SQL | `core/sqlsafe.py` |
 | **Row-level security** | Per-member row rules rewrite the table reference into a filtered subquery shared by every read path; fails closed if a rule's column disappears | `analytics/rls.py` |
-| **PII masking** | Sensitive columns detected on upload by name and value shape, redacted in the SQL projection for everyone except admins; source data never altered | `analytics/privacy.py` |
+| **PII masking** | Sensitive columns detected on upload by name and value shape, redacted in the SQL projection for everyone except signed-in admins; source data never altered. **Public share links are always masked**, including links an admin created | `analytics/privacy.py`, `analytics/rls.py` |
+| **Share links** | Unguessable 192-bit capability token per dashboard; revocable, optional expiry. Read-only, evaluated under the link author's row rules, always PII-masked. Visitors can drill into aggregates but only *within* what was shared (pinned filters cannot be changed, dates are clamped); raw rows, CSV export and free-form questions are never available publicly | `analytics/sharing.py` |
 | **RBAC** | admin / editor / viewer; content mutations require editor, user and policy management require admin | `api/deps.py` |
 | **Password policy** | NIST SP 800-63B style: length, breach-corpus blocklist, no account-derived or sequential passwords | `core/passwords.py` |
 | **Session revocation** | `token_epoch` per user; bumped on password change, role change, and "sign out everywhere" | `core/security.py` |

@@ -95,7 +95,7 @@ def _check_date(s: str) -> None:
         raise DrillError(f"bad date {s!r} (use YYYY-MM or YYYY-MM-DD)")
 
 
-def _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to) -> _Slice:
+def _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to, public=False) -> _Slice:
     from .rls import secured_relation
 
     dataset = get_dataset(con, workspace_id, dataset_id)
@@ -113,7 +113,7 @@ def _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to) -
     for bound in (date_from, date_to):
         if bound is not None:
             _check_date(bound)
-    relation, rls_params = secured_relation(con, workspace_id, user_id, dataset)
+    relation, rls_params = secured_relation(con, workspace_id, user_id, dataset, public=public)
     return _Slice(
         dataset=dataset, columns=columns, allowed=allowed,
         relation=relation, rls_params=list(rls_params),
@@ -255,10 +255,10 @@ def _describe(sl: _Slice, measure: str | None, agg: str, rows: int, skipped: int
 # ---------------------------------------------------------------- inspect ---
 
 def inspect(con, workspace_id, dataset_id, *, measure=None, agg="sum", filters=None,
-            date_from=None, date_to=None, grain="month", user_id=None) -> dict:
+            date_from=None, date_to=None, grain="month", user_id=None, public=False) -> dict:
     from .rls import restricts
 
-    sl = _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to)
+    sl = _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to, public)
     if grain not in GRAINS:
         raise DrillError(f"unknown grain {grain!r}")
     measure = _resolve_measure(sl, measure, agg)
@@ -314,7 +314,8 @@ def inspect(con, workspace_id, dataset_id, *, measure=None, agg="sum", filters=N
 
     notes = []
     if user_id and restricts(con, workspace_id, user_id, dataset_id):
-        notes.append("Your row-access rules apply: this number covers only the rows you are allowed to see.")
+        notes.append("This link covers only the rows its author can see." if public else
+                     "Your row-access rules apply: this number covers only the rows you are allowed to see.")
     if skipped:
         notes.append(f"{skipped:,} row{'s' if skipped != 1 else ''} have no {measure.replace('_', ' ')} "
                      "value and are left out of the calculation.")
@@ -450,8 +451,8 @@ def _split(con, sl: _Slice, dim: str, measure, agg, vexpr, limit, total) -> dict
 # -------------------------------------------------------------- breakdown ---
 
 def breakdown(con, workspace_id, dataset_id, *, dimension, measure=None, agg="sum",
-              filters=None, date_from=None, date_to=None, limit=50, user_id=None) -> dict:
-    sl = _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to)
+              filters=None, date_from=None, date_to=None, limit=50, user_id=None, public=False) -> dict:
+    sl = _open(con, workspace_id, dataset_id, user_id, filters, date_from, date_to, public)
     if dimension not in sl.allowed or dimension == sl.date_col:
         raise DrillError(f"cannot break down by {dimension!r}")
     measure = _resolve_measure(sl, measure, agg)
