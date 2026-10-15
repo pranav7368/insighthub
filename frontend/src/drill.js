@@ -130,3 +130,6 @@ export function currentPeriod(lastDate, grain) {
   if (grain === "quarter") return `${y}-Q${Math.floor((m - 1) / 3) + 1}`;
   return `${y}-${String(m).padStart(2, "0")}`;
 }
+
+/** True for the keys that open a context menu from the keyboard. */
+export const isMenuKey = (e) => e.key === "ContextMenu" || (e.shiftKey && e.key === "F10");

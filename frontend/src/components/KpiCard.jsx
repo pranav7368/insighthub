@@ -1,5 +1,5 @@
 import { formatNumber, humanLabel } from "../format";
-import { TARGET_STATUS } from "../drill";
+import { TARGET_STATUS, isMenuKey } from "../drill";
 import Sparkline from "./Sparkline";
 
 function TargetLine({ target, subtype }) {
@@ -16,7 +16,7 @@ function TargetLine({ target, subtype }) {
   );
 }
 
-export default function KpiCard({ kpi, active, onSelect, target }) {
+export default function KpiCard({ kpi, active, onSelect, onContext, target }) {
   const delta = kpi.delta_pct;
   const hasDelta = delta !== null && delta !== undefined;
   const up = hasDelta && delta > 0;
@@ -24,7 +24,9 @@ export default function KpiCard({ kpi, active, onSelect, target }) {
   const deltaClass = flat ? "flat" : up ? "up" : "down";
 
   return (
-    <button className={`kpi-card ${active ? "kpi-card--active" : ""}`} onClick={onSelect}>
+    <button className={`kpi-card ${active ? "kpi-card--active" : ""}`} onClick={onSelect}
+      onContextMenu={onContext ? (e) => { e.preventDefault(); onContext(e); } : undefined}
+      onKeyDown={onContext ? (e) => { if (isMenuKey(e)) { e.preventDefault(); onContext(e); } } : undefined}>
       <div className="kpi-card__top">
         <span className="kpi-card__label">{humanLabel(kpi.column)}</span>
         {hasDelta && (

@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { formatNumber, humanLabel } from "../format";
 
@@ -5,7 +6,8 @@ import { formatNumber, humanLabel } from "../format";
 // fold into a neutral "Other" slice (never cycle beyond the validated set).
 const COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--text-muted)"];
 
-export default function ContributionDonut({ dimensionName, breakdown, subtype, onSelect, onShowAll, activeValue }) {
+export default function ContributionDonut({ dimensionName, breakdown, subtype, onSelect, onShowAll, onContext, activeValue }) {
+  const hovered = useRef(null);
   const raw = breakdown?.data ?? [];
   if (raw.length < 2) return null;
   const top = raw.slice(0, 3);
@@ -22,7 +24,11 @@ export default function ContributionDonut({ dimensionName, breakdown, subtype, o
   };
 
   return (
-    <div className="chart-card">
+    <div className="chart-card" onContextMenu={(e) => {
+      if (!onContext || !hovered.current || hovered.current === "Other") return;
+      e.preventDefault();
+      onContext(e, dimensionName, hovered.current);
+    }}>
       <div className="chart-card__title">
         Contribution by {humanLabel(dimensionName)}
         <span className="chart-card__tag">click a slice for details</span>
@@ -31,6 +37,8 @@ export default function ContributionDonut({ dimensionName, breakdown, subtype, o
         <PieChart>
           <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={90}
             paddingAngle={2} stroke="var(--surface-1)" strokeWidth={2} cursor="pointer"
+            onMouseEnter={(slice) => { hovered.current = slice?.name ?? null; }}
+            onMouseLeave={() => { hovered.current = null; }}
             onClick={(slice) => {
               if (!slice?.name) return;
               if (slice.name === "Other") onShowAll?.(dimensionName);

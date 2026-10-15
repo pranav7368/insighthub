@@ -15,7 +15,7 @@ export default function DashSection({
 }) {
   const [over, setOver] = useState(false);
 
-  if (!arranging) return <div className="dash-section" data-tour={sectionKey}>{children}</div>;
+  if (!arranging) return <div className="dash-section" id={`section-${sectionKey}`} data-tour={sectionKey}>{children}</div>;
 
   const label = sectionLabel(sectionKey);
 

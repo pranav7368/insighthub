@@ -25,9 +25,15 @@ import DashSection from "./DashSection";
 import Inspector from "./Inspector";
 import DecompositionTree from "./DecompositionTree";
 import ActionsPanel from "./ActionsPanel";
+import CommandPalette from "./CommandPalette";
+import DataMenu from "./DataMenu";
 import { mappableFraction } from "../geo";
 import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections";
 import { buildUrlSearch, makeCtx, readUrlState, targetFor } from "../drill";
+import { buildCommands } from "../palette";
+import { humanLabel } from "../format";
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
 
 // stable JSON for comparing a live config against a saved one (dirty check).
 // hidden_sections is a set (sorted), section_order is a sequence (kept as-is).
@@ -65,6 +71,9 @@ export default function DashboardView({ datasetId, canEdit = false }) {
   const [targets, setTargets] = useState([]);
   const [targetsVersion, setTargetsVersion] = useState(0);
   const returnFocus = useRef(null);
+  const [menu, setMenu] = useState(null);                 // right-click menu on a data point
+  const [paletteOpen, setPaletteOpen] = useState(false);  // Ctrl/⌘ K
+  const closeMenu = useCallback(() => setMenu(null), []);
   const [error, setError] = useState(null);
   const [pair, setPair] = useState(null);            // user-chosen scatter pair
   const [customScatter, setCustomScatter] = useState(null);
@@ -206,6 +215,22 @@ export default function DashboardView({ datasetId, canEdit = false }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [arranging]);
 
+  // Ctrl/⌘ K (or "/" outside a text field) opens the command palette
+  useEffect(() => {
+    const onKey = (e) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName || "") || e.target?.isContentEditable;
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      } else if (e.key === "/" && !typing && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   // when the user clicks a heatmap cell, fetch that pair (respecting filters)
   useEffect(() => {
     if (!pair) { setCustomScatter(null); return; }
@@ -247,7 +272,19 @@ export default function DashboardView({ datasetId, canEdit = false }) {
     });
 
   if (error) return <div className="empty-panel">{error}</div>;
-  if (!dashboard) return <div className="empty-panel">Loading…</div>;
+  if (!dashboard) {
+    // the shape of the page while it loads, so nothing jumps when it arrives
+    return (
+      <div className="dash-layout" aria-busy="true" aria-label="Loading the dashboard">
+        <div className="dash-content">
+          <div className="skeleton skeleton--title" />
+          <div className="kpi-row">{[0, 1, 2].map((i) => <div key={i} className="skeleton skeleton--kpi" />)}</div>
+          <div className="skeleton skeleton--chart" />
+          <div className="chart-grid"><div className="skeleton skeleton--chart" /><div className="skeleton skeleton--chart" /></div>
+        </div>
+      </div>
+    );
+  }
 
   const subtypeOf = (m) => dashboard.kpis.find((k) => k.column === m)?.subtype;
   const measure = activeMeasure || dashboard.chosen_measure;
@@ -299,6 +336,33 @@ export default function DashboardView({ datasetId, canEdit = false }) {
     ...(drill.dimension ? { tab: "breakdown", dimension: drill.dimension } : {}),
   });
 
+  // ---- right-click: every way into the number under the pointer ----
+  const pointAt = (e) => {
+    if (e.clientX || e.clientY) return { x: e.clientX, y: e.clientY };
+    // keyboard (Menu key / Shift+F10): anchor to the element instead
+    const r = e.currentTarget?.getBoundingClientRect?.();
+    return r ? { x: r.left + 12, y: r.bottom - 8 } : { x: 40, y: 40 };
+  };
+  const sliceMenu = (e, partial, title) => {
+    const open = (extra) => () => openInspect({ ...partial, ...extra });
+    const items = [
+      { label: "Open details", hint: "trend · spread · parts", run: open({}) },
+      ...(dashboard.date_column ? [{ label: "Why did it change?", hint: "waterfall", run: open({ tab: "change" }) }] : []),
+      { label: "Break it down", run: open({ tab: "breakdown" }) },
+      { label: "See the rows", run: open({ tab: "records" }) },
+      { label: "Ask about it", run: open({ tab: "ask" }) },
+    ];
+    if (partial.filters || partial.date_from) {
+      items.push({
+        label: "Filter the dashboard to this",
+        run: () => applyInspect(makeCtx({ measure, filters, date_from: dateFrom || null, date_to: dateTo || null, ...partial })),
+      });
+    }
+    setMenu({ ...pointAt(e), title, items });
+  };
+  const segmentMenu = (e, dim, value) =>
+    sliceMenu(e, { filters: { ...filters, [dim]: String(value) } }, `${humanLabel(dim)}: ${value}`);
+
   // Every section, in its natural order. A null node means "this dataset has
   // nothing to show here" — those drop out entirely so arrange mode never
   // offers an empty tile to drag.
@@ -314,7 +378,8 @@ export default function DashboardView({ datasetId, canEdit = false }) {
           {dashboard.kpis.map((kpi) => (
             <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
               target={targetFor(targets, { measure: kpi.column, filters, date_from: dateFrom, date_to: dateTo })}
-              onSelect={() => { setActiveMeasure(kpi.column); openInspect({ measure: kpi.column }); }} />
+              onSelect={() => { setActiveMeasure(kpi.column); openInspect({ measure: kpi.column }); }}
+              onContext={(e) => sliceMenu(e, { measure: kpi.column }, humanLabel(kpi.column))} />
           ))}
         </div>
       ),
@@ -334,7 +399,10 @@ export default function DashboardView({ datasetId, canEdit = false }) {
       node: <DriverAnalysis explain={explainData} onSelect={(dim, name, ex) => openInspect({
         measure: ex.measure, filters: { [dim]: String(name) },
         date_from: ex.current_period, date_to: ex.current_period,
-      })} />,
+      })} onContext={(e, dim, name, ex) => sliceMenu(e, {
+        measure: ex.measure, filters: { [dim]: String(name) },
+        date_from: ex.current_period, date_to: ex.current_period,
+      }, `${humanLabel(dim)}: ${name} · ${ex.current_period}`)} />,
     },
     {
       key: "tree",
@@ -354,6 +422,7 @@ export default function DashboardView({ datasetId, canEdit = false }) {
           forecast={dashboard.forecasts?.[measure]}
           anomalies={dashboard.anomalies?.[measure]}
           onPeriod={(period) => openInspect({ date_from: period, date_to: period })}
+          onContext={(e, period) => sliceMenu(e, { date_from: period, date_to: period }, `${humanLabel(measure)} · ${period}`)}
         />
       ),
     },
@@ -364,11 +433,12 @@ export default function DashboardView({ datasetId, canEdit = false }) {
           {Object.entries(dashboard.breakdowns).map(([dim, bd]) => (
             <BreakdownChart key={dim} dimensionName={dim} breakdown={bd}
               measure={measure} subtype={subtypeOf(measure)}
-              onSelect={inspectValue} onShowAll={inspectAll} activeValue={filters[dim]} />
+              onSelect={inspectValue} onShowAll={inspectAll} onContext={segmentMenu} activeValue={filters[dim]} />
           ))}
           {Object.entries(dashboard.breakdowns).slice(0, 1).map(([dim, bd]) => (
             <ContributionDonut key={`donut-${dim}`} dimensionName={dim} breakdown={bd}
-              subtype={subtypeOf(measure)} onSelect={inspectValue} onShowAll={inspectAll} activeValue={filters[dim]} />
+              subtype={subtypeOf(measure)} onSelect={inspectValue} onShowAll={inspectAll} onContext={segmentMenu}
+              activeValue={filters[dim]} />
           ))}
         </div>
       ),
@@ -426,6 +496,19 @@ export default function DashboardView({ datasetId, canEdit = false }) {
   );
   const visibleKeys = visible.map((s) => s.key);
 
+  const commands = paletteOpen ? buildCommands({
+    dashboard, views, visibleSections: visibleKeys, filters,
+    on: {
+      inspect: openInspect,
+      applyView,
+      scrollTo: (key) => document.getElementById(`section-${key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+      clearFilters: () => { setFilters({}); setDateFrom(undefined); setDateTo(undefined); },
+      setDates: (from, to) => { setDateFrom(from); setDateTo(to); },
+      exportFile: (kind) => (kind === "csv" ? exportDatasetCsv(datasetId, dashboard.dataset?.name) : runExport(kind)),
+      arrange: () => setArranging(true),
+    },
+  }) : [];
+
   return (
     <div className={`dash-layout${inspectCtx ? " has-inspector" : ""}`}>
       <div className={`filter-panel${filtersOpen ? " filter-panel--open" : ""}`}>
@@ -452,6 +535,10 @@ export default function DashboardView({ datasetId, canEdit = false }) {
             <span className="dash-topline__rows">{dashboard.row_count_filtered?.toLocaleString("en-IN")} rows</span>
           </div>
           <div className="dash-topline__actions" data-tour="views">
+            <button className="palette-btn no-export" onClick={() => setPaletteOpen(true)}
+              aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} title="Find any number, segment or action">
+              <span aria-hidden>⌕</span> Search <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
+            </button>
             <ViewsBar
               views={views} activeViewId={activeViewId} dirty={viewDirty}
               hiddenSections={hiddenSections} arranging={arranging}
@@ -509,6 +596,8 @@ export default function DashboardView({ datasetId, canEdit = false }) {
           onNavigate={navigateInspect} onClose={closeInspect} onApply={applyInspect}
           targets={targets} canEdit={canEdit} onTargetsChanged={targetsChanged} />
       )}
+      {menu && <DataMenu {...menu} onClose={closeMenu} />}
+      {paletteOpen && <CommandPalette commands={commands} onClose={() => setPaletteOpen(false)} />}
     </div>
   );
 }
