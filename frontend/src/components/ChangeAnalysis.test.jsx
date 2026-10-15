@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -114,7 +114,7 @@ describe("DecompositionTree", () => {
   it("disappears when there is no date to compare over", async () => {
     api.getVariance.mockRejectedValue({ response: { data: { detail: "no date column" } } });
     const { container } = render(<DecompositionTree datasetId="ds" measure="revenue" filters={{}} />);
-    await new Promise((r) => setTimeout(r, 0));
-    expect(container).toBeEmptyDOMElement();
+    // the frame renders first; it goes once the refusal arrives — however long that takes
+    await waitFor(() => expect(container).toBeEmptyDOMElement());
   });
 });

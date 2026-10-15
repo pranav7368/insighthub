@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -76,7 +76,9 @@ describe("ActionsPanel", () => {
   it("renders nothing when there is nothing to recommend", async () => {
     api.getActions.mockResolvedValue({ actions: [] });
     const { container } = render(<ActionsPanel datasetId="ds" measure="revenue" filters={{}} onOpen={vi.fn()} />);
-    await new Promise((r) => setTimeout(r, 0));
+    // wait for the request to settle, then check nothing was rendered for it
+    await waitFor(() => expect(api.getActions).toHaveBeenCalled());
+    await api.getActions.mock.results[0].value;
     expect(container).toBeEmptyDOMElement();
   });
 });
