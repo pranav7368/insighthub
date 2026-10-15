@@ -457,7 +457,9 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 /* ---- narrow: header + toplines wrap ---- */
 @media (max-width: 760px) {
   .app-header { height: auto; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); padding: 10px var(--sp-4); }
-  .app-header__actions { margin-left: auto; }
+  /* nine actions do not fit one phone row: let them wrap under the brand
+     instead of pushing the whole page sideways */
+  .app-header__actions { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 6px; }
   .tabs { order: 3; width: 100%; }
   .tabs button { flex: 1; }
   .toolbar { padding: 10px var(--sp-4); }
@@ -474,6 +476,11 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 /* ---- phones ---- */
 @media (max-width: 480px) {
   .kpi-row, .stat-row { grid-template-columns: 1fr 1fr; }
+  /* grid items default to min-width:auto and refuse to shrink below their
+     content; let the card shrink and the sparkline give way */
+  .kpi-card { min-width: 0; padding: 12px; }
+  .kpi-card__foot { min-width: 0; }
+  .kpi-card__foot svg { flex-shrink: 1; min-width: 0; }
   .insights__list, .dist-grid { grid-template-columns: 1fr; }
   .upd-modes { flex-direction: column; }
   .kpi-card__value { font-size: 20px; }
