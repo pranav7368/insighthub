@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { deleteTarget, errorText, setTarget } from "../api";
-import { formatNumber, humanLabel } from "../format";
+import { formatDate, formatNumber, humanLabel } from "../format";
+import { toast } from "../toast";
 import { TARGET_STATUS, currentPeriod } from "../drill";
 
 const GRAIN_LABEL = { month: "Month", quarter: "Quarter", year: "Year" };
@@ -25,6 +26,7 @@ export default function TargetPanel({ datasetId, ctx, target, subtype, lastDate,
       await setTarget(datasetId, { measure: ctx.measure, grain, period, value: Number(value), filters: ctx.filters });
       setEditing(false);
       onChanged();
+      toast(`Target set: ${humanLabel(ctx.measure)} ${formatNumber(Number(value), subtype)} for ${formatDate(period)}`);
     } catch (err) {
       setError(errorText(err, "Could not save the target."));
     } finally {
@@ -33,7 +35,7 @@ export default function TargetPanel({ datasetId, ctx, target, subtype, lastDate,
   };
   const remove = async () => {
     setBusy(true);
-    try { await deleteTarget(target.target_id); onChanged(); }
+    try { await deleteTarget(target.target_id); onChanged(); toast("Target removed"); }
     catch (err) { setError(errorText(err, "Could not remove the target.")); }
     finally { setBusy(false); }
   };
@@ -51,7 +53,7 @@ export default function TargetPanel({ datasetId, ctx, target, subtype, lastDate,
         <div className={`target target--${target.status}`}>
           <div className="target__head">
             <span className="target__status">{TARGET_STATUS[target.status] || target.status}</span>
-            <span className="target__period">{target.period}</span>
+            <span className="target__period">{formatDate(target.period)}</span>
           </div>
           {target.status === "broken" ? (
             <p className="insp-caption">{target.reason}</p>

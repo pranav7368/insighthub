@@ -1,26 +1,8 @@
 /* ===== App shell ===== */
 .app-shell { display: flex; flex-direction: column; min-height: 100vh; }
 
-.app-header {
-  position: sticky; top: 0; z-index: 30;
-  display: flex; align-items: center; gap: var(--sp-4);
-  height: var(--header-h); padding: 0 var(--sp-6);
-  background: color-mix(in srgb, var(--surface-1) 88%, transparent);
-  backdrop-filter: saturate(1.4) blur(10px);
-  border-bottom: 1px solid var(--border);
-}
 .brand { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; white-space: nowrap; }
 .brand__logo { color: var(--series-1); margin-right: 5px; }
-.app-header__actions { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); }
-
-.tabs { display: flex; gap: 3px; background: var(--surface-2); padding: 3px; border-radius: var(--radius-sm); }
-.tabs button {
-  border: none; background: transparent; color: var(--text-secondary);
-  padding: 6px 15px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 500;
-  transition: color var(--transition), background var(--transition);
-}
-.tabs button:hover { color: var(--text-primary); }
-.tabs button.active { background: var(--surface-1); color: var(--text-primary); box-shadow: var(--shadow-sm); }
 
 .icon-btn {
   width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
@@ -45,15 +27,6 @@
 .upload-button button:disabled { opacity: 0.6; cursor: default; }
 .upload-error { color: var(--status-critical); font-size: 12px; margin-top: 6px; }
 
-/* toolbar (dataset picker + Manage menu) under the header */
-.toolbar {
-  display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap;
-  padding: 10px var(--sp-6); background: var(--surface-1); border-bottom: 1px solid var(--border);
-}
-.dataset-select {
-  padding: 8px 11px; border-radius: var(--radius-sm); border: 1px solid var(--border);
-  background: var(--surface-1); color: var(--text-primary); font-size: 13px; max-width: 260px;
-}
 .link-btn { background: none; border: none; color: var(--series-1); cursor: pointer; font-size: 13px; padding: 4px; }
 .link-btn:hover { text-decoration: underline; }
 
@@ -255,16 +228,6 @@
 .lg--dot { width: 8px; height: 8px; border-radius: 50%; background: var(--status-critical); }
 .lg--madash { background: repeating-linear-gradient(90deg, var(--text-muted) 0 2px, transparent 2px 4px); height: 2px; }
 
-/* ===== Growth strip (MoM/QoQ/YoY) ===== */
-.growth-strip { display: flex; align-items: center; gap: 20px; flex-wrap: wrap; background: var(--surface-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; }
-.growth-strip__title { font-size: 12px; color: var(--text-muted); font-weight: 500; }
-.growth-item { display: flex; align-items: baseline; gap: 6px; }
-.growth-item__label { font-size: 11px; color: var(--text-muted); }
-.growth-item__val { font-size: 15px; font-weight: 600; }
-.growth-item__val.up { color: var(--success-text); }
-.growth-item__val.down { color: var(--status-critical); }
-.growth-item__val.flat { color: var(--text-muted); }
-
 .dist-std { font-size: 10px; color: var(--text-muted); margin-top: 4px; font-variant-numeric: tabular-nums; }
 
 /* ===== AI narrative & recommendations ===== */
@@ -423,13 +386,11 @@
 
 /* center the app on large screens, tighten on small */
 .dash-layout { max-width: calc(var(--content-max) + 20px); margin-inline: auto; }
-.filter-panel { flex-shrink: 0; }
-.filters-toggle { display: none; }
+
 .ask-view, .compare-pane { max-width: var(--content-max); margin-inline: auto; }
 
 /* soft elevation + hover feedback on the main surfaces */
-.chart-card, .kpi-card, .insights, .ai-narrative, .compare-controls, .compare-kpis,
-.growth-strip, .dist-section, .data-profile, .filter-bar, .quality-stat {
+.chart-card, .kpi-card, .insights, .ai-narrative, .compare-controls, .compare-kpis, .dist-section, .data-profile, .filter-bar, .quality-stat {
   box-shadow: var(--shadow-sm);
 }
 .chart-card { transition: box-shadow var(--transition), transform var(--transition); }
@@ -442,27 +403,13 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 /* ---- tablet: stack the filter sidebar into a toggle panel ---- */
 @media (max-width: 900px) {
   .dash-layout { flex-direction: column; padding: var(--sp-4); gap: var(--sp-4); }
-  .filters-toggle {
-    display: inline-flex; align-items: center; padding: 7px 13px; border-radius: var(--radius-sm);
-    border: 1px solid var(--border); background: var(--surface-1); color: var(--text-secondary);
-    cursor: pointer; font-size: 13px;
-  }
-  .filters-toggle:hover { border-color: var(--series-1); color: var(--text-primary); }
-  .filter-panel { display: none; }
-  .filter-panel--open { display: block; }
+
   .filter-bar { width: auto; }
   .chart-grid { grid-template-columns: 1fr; }
 }
 
 /* ---- narrow: header + toplines wrap ---- */
 @media (max-width: 760px) {
-  .app-header { height: auto; flex-wrap: wrap; gap: var(--sp-2) var(--sp-3); padding: 10px var(--sp-4); }
-  /* nine actions do not fit one phone row: let them wrap under the brand
-     instead of pushing the whole page sideways */
-  .app-header__actions { margin-left: 0; width: 100%; flex-wrap: wrap; gap: 6px; }
-  .tabs { order: 3; width: 100%; }
-  .tabs button { flex: 1; }
-  .toolbar { padding: 10px var(--sp-4); }
   .menu { margin-left: auto; }
   .dash-topline { flex-direction: column; align-items: stretch; gap: var(--sp-3); }
   .dash-topline__actions { width: 100%; flex-wrap: wrap; }
@@ -1013,7 +960,7 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 @media (prefers-reduced-motion: reduce) { .inspector { animation: none; } }
 /* only make room when the dashboard still has a comfortable width left;
    below that the drawer overlays, which beats squeezing every chart */
-@media (min-width: 1700px) { .dash-layout.has-inspector { padding-right: 560px; } }
+@media (min-width: 1700px) { .dash-layout.has-inspector { padding-right: var(--insp-pad, 560px); } }
 
 .inspector__head { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--border); }
 .crumbs { flex: 1; min-width: 0; }

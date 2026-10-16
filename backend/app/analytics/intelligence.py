@@ -55,6 +55,21 @@ def format_value(value, subtype: str | None) -> str:
     return f"{n:,.0f}" if n == int(n) else f"{n:,.2f}"
 
 
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def human_period(period) -> str:
+    """A period key as people write it: "2026-10" -> "Oct 2026",
+    "2026-10-28" -> "28 Oct 2026". Anything else ("2026-Q4") passes through.
+    Prose only: keys in payloads stay ISO so they can be sent back."""
+    s = str(period or "")
+    parts = s.split("-")
+    if len(parts) in (2, 3) and len(parts[0]) == 4 and all(p.isdigit() for p in parts) and 1 <= int(parts[1]) <= 12:
+        month = f"{_MONTHS[int(parts[1]) - 1]} {parts[0]}"
+        return f"{int(parts[2])} {month}" if len(parts) == 3 else month
+    return s
+
+
 def _humanize(name: str) -> str:
     return name.replace("_", " ").strip().title()
 
@@ -229,12 +244,12 @@ def build_insights(
         if change is not None:
             if change >= 5:
                 insights.append(Insight("good", f"{label} is trending up",
-                    f"{label} rose {change:+.1f}% from {series[0]['period']} ({fv(pm, first)}) "
-                    f"to {series[-1]['period']} ({fv(pm, last)}).", "trend", {"measure": pm}))
+                    f"{label} rose {change:+.1f}% from {human_period(series[0]['period'])} ({fv(pm, first)}) "
+                    f"to {human_period(series[-1]['period'])} ({fv(pm, last)}).", "trend", {"measure": pm}))
             elif change <= -5:
                 insights.append(Insight("warning", f"{label} is trending down",
-                    f"{label} fell {change:.1f}% from {series[0]['period']} ({fv(pm, first)}) "
-                    f"to {series[-1]['period']} ({fv(pm, last)}).", "trend", {"measure": pm}))
+                    f"{label} fell {change:.1f}% from {human_period(series[0]['period'])} ({fv(pm, first)}) "
+                    f"to {human_period(series[-1]['period'])} ({fv(pm, last)}).", "trend", {"measure": pm}))
             else:
                 insights.append(Insight("info", f"{label} is broadly flat",
                     f"{label} moved {change:+.1f}% across the period — no strong trend.", "trend", {"measure": pm}))
@@ -243,8 +258,8 @@ def build_insights(
             if mom is not None and abs(mom) >= 8:
                 sev = "good" if mom > 0 else "warning"
                 insights.append(Insight(sev, f"Latest month {'jumped' if mom > 0 else 'dropped'} {abs(mom):.0f}%",
-                    f"{label} went from {fv(pm, series[-2]['value'])} in {series[-2]['period']} "
-                    f"to {fv(pm, series[-1]['value'])} in {series[-1]['period']} ({mom:+.1f}%).", "momentum",
+                    f"{label} went from {fv(pm, series[-2]['value'])} in {human_period(series[-2]['period'])} "
+                    f"to {fv(pm, series[-1]['value'])} in {human_period(series[-1]['period'])} ({mom:+.1f}%).", "momentum",
                     {"measure": pm, "period": series[-1]["period"]}))
         fc = forecasts.get(pm, {}).get("forecast") or []
         if fc:
@@ -257,7 +272,7 @@ def build_insights(
                 track = (f" Using {model}, which was off by {acc['mape']:.0f}% on average when tested "
                          f"against the last {acc['months']} months.")
             insights.append(Insight("info", f"Projected next month: {fv(pm, nxt['value'])}",
-                f"{label} is projected at {fv(pm, nxt['value'])} in {nxt['period']} "
+                f"{label} is projected at {fv(pm, nxt['value'])} in {human_period(nxt['period'])} "
                 f"(range {fv(pm, nxt['lower'])}–{fv(pm, nxt['upper'])}).{track} "
                 "This is a model projection, not a guarantee.",
                 "forecast", {"measure": pm}))
@@ -293,8 +308,8 @@ def build_insights(
             if a["period"] in seen_periods:
                 continue
             seen_periods.add(a["period"])
-            insights.append(Insight(a["severity"], f"Unusual {a['direction']} in {a['period']}",
-                f"{_humanize(measure)} was {fv(measure, a['value'])} in {a['period']}, "
+            insights.append(Insight(a["severity"], f"Unusual {a['direction']} in {human_period(a['period'])}",
+                f"{_humanize(measure)} was {fv(measure, a['value'])} in {human_period(a['period'])}, "
                 f"vs an expected ~{fv(measure, a['expected'])}. Worth investigating.", "anomaly",
                 {"measure": measure, "period": a["period"]}))
 

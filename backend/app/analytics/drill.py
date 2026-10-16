@@ -28,6 +28,7 @@ from datetime import date, timedelta
 
 from ..core.sqlsafe import safe_identifier
 from .engine import _date_bounds, get_columns, get_dataset
+from .intelligence import human_period
 
 AGGREGATIONS = ("sum", "avg", "count", "min", "max", "median")
 GRAINS = ("day", "week", "month", "quarter", "year")
@@ -320,8 +321,8 @@ def inspect(con, workspace_id, dataset_id, *, measure=None, agg="sum", filters=N
         notes.append(f"{skipped:,} row{'s' if skipped != 1 else ''} have no {measure.replace('_', ' ')} "
                      "value and are left out of the calculation.")
     if trend and trend["latest_period_partial"]:
-        notes.append(f"The data ends on {trend['data_through']}, partway through "
-                     f"{trend['points'][-1]['period']} — that period is incomplete, so compare it with care.")
+        notes.append(f"The data ends on {human_period(trend['data_through'])}, partway through "
+                     f"{human_period(trend['points'][-1]['period'])} — that period is incomplete, so compare it with care.")
 
     return {
         "dataset": {"dataset_id": sl.dataset["dataset_id"], "name": sl.dataset["name"]},

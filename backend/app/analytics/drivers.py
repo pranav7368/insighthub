@@ -10,7 +10,7 @@ the one whose movements most concentrate the overall change.
 
 from ..core.sqlsafe import safe_identifier, safe_table_name
 from .engine import get_columns, get_dataset
-from .intelligence import format_value
+from .intelligence import format_value, human_period
 
 
 class DriverError(ValueError):
@@ -116,7 +116,7 @@ def _summarize(r: dict) -> str:
     head = f"{meas[:1].upper()}{meas[1:]} {direction}"
     if r["pct_change"] is not None and d != 0:
         head += f" {abs(r['pct_change']):.1f}% ({sign}{format_value(abs(d), sub)})"
-    head += f" from {r['previous_period']} to {r['current_period']}"
+    head += f" from {human_period(r['previous_period'])} to {human_period(r['current_period'])}"
 
     prim = r["primary_dimension"]
     if prim and d != 0 and r["dimensions"].get(prim, {}).get("drivers"):

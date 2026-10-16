@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { errorText, getDashboard } from "../api";
 import ComparisonChart from "./ComparisonChart";
-import { formatNumber, humanLabel } from "../format";
+import { formatNumber, formatRange, humanLabel } from "../format";
 
 function deltaPct(a, b) {
   if (b === 0 || b == null || a == null) return null;
@@ -47,8 +47,8 @@ export default function ComparePane({ datasetId }) {
         if (!pa.from || !pb.from) { setError("Pick both periods."); setBusy(false); return; }
         fa = { date_from: pa.from, date_to: pa.to || pa.from };
         fb = { date_from: pb.from, date_to: pb.to || pb.from };
-        labelA = `${pa.from}…${pa.to || pa.from}`;
-        labelB = `${pb.from}…${pb.to || pb.from}`;
+        labelA = formatRange(pa.from, pa.to || pa.from);
+        labelB = formatRange(pb.from, pb.to || pb.from);
       }
       const [a, b] = await Promise.all([getDashboard(datasetId, fa), getDashboard(datasetId, fb)]);
       setResult({ a, b, labelA, labelB });

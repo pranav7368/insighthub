@@ -19,7 +19,7 @@ export default function CorrelationHeatmap({ correlations, activePair, onSelect 
     <div className="chart-card">
       <div className="chart-card__title">
         Correlation matrix
-        <span className="chart-card__tag">click a cell to plot the pair</span>
+        <span className="chart-card__tag chart-card__hint">click a cell to plot the pair</span>
       </div>
       <div className="heatmap-scroll">
         <table className="heatmap">

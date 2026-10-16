@@ -350,8 +350,16 @@ def _summary(r: dict) -> str:
         lead = max(r["steps"], key=lambda s: abs(s["delta"]) if (s["delta"] > 0) == (d > 0) else -1)
         if (lead["delta"] > 0) == (d > 0) and lead["delta"] != 0 and not lead["blank"]:
             share = abs(lead["delta"] / d) * 100
-            text += (f" — {r['dimension'].replace('_', ' ')} {lead['name']} accounts for "
-                     f"{'+' if lead['delta'] > 0 else '−'}{_fmt(abs(lead['delta']), sub)} ({share:.0f}% of the move)")
+            dim = r["dimension"].replace("_", " ")
+            amount = f"{'+' if lead['delta'] > 0 else '−'}{_fmt(abs(lead['delta']), sub)}"
+            if share > 100:
+                # mathematically fine, but "598% of the move" reads as an error:
+                # say what it means — one value moved more than the total did
+                others = "rose" if d < 0 else "fell"
+                text += (f" — {dim} {lead['name']} alone moved {amount}, more than the whole change; "
+                         f"other {dim} values {others} and offset part of it")
+            else:
+                text += f" — {dim} {lead['name']} accounts for {amount} ({share:.0f}% of the move)"
     return text + "."
 
 

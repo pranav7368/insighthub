@@ -14,7 +14,7 @@ describe("drill context", () => {
 
   it("breadcrumbs read measure › period › filters", () => {
     const c = drillInto(drillPeriod(base, "2025-03", "2025-03"), "region", "North");
-    expect(crumbs(c).map((x) => x.label)).toEqual(["Revenue", "2025-03", "Region: North"]);
+    expect(crumbs(c).map((x) => x.label)).toEqual(["Revenue", "Mar 2025", "Region: North"]);
     expect(crumbs(makeCtx({ agg: "count" }))[0].label).toBe("Row count");
   });
 

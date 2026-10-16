@@ -2,7 +2,7 @@ import {
   Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { formatNumber } from "../format";
+import { formatDate, formatNumber, formatTick } from "../format";
 
 const PIE_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--text-muted)"];
 
@@ -11,7 +11,7 @@ function Tip({ active, payload, label, subtype }) {
   const p = payload[0];
   return (
     <div className="chart-tooltip">
-      <div className="chart-tooltip__label">{p.payload.label ?? label}</div>
+      <div className="chart-tooltip__label">{formatDate(p.payload.label ?? label)}</div>
       <div className="chart-tooltip__value">{formatNumber(p.value, subtype)}</div>
     </div>
   );
@@ -52,7 +52,7 @@ export default function ResultChart({ result }) {
       <ResponsiveContainer width="100%" height={260}>
         <LineChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
           <CartesianGrid stroke="var(--gridline)" vertical={false} />
-          <XAxis dataKey="label" stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} minTickGap={20} />
+          <XAxis dataKey="label" tickFormatter={formatTick} stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} minTickGap={20} />
           <YAxis stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 11 }} tickLine={false} axisLine={false}
             tickFormatter={(v) => formatNumber(v, subtype)} width={70} />
           <Tooltip content={<Tip subtype={subtype} />} cursor={{ stroke: "var(--baseline)" }} />

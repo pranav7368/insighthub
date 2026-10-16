@@ -6,12 +6,13 @@
 // set, so an unknown key here would be rejected on save.
 
 export const SECTIONS = [
+  // "summary" is pinned above the arrangeable sections; listed so it can be hidden
+  ["summary", "Summary"],
   ["kpis", "KPI cards"],
   ["actions", "Recommended actions"],
   ["metrics", "Certified metrics"],
   ["drivers", "What changed"],
   ["tree", "Decomposition tree"],
-  ["growth", "Growth strip"],
   ["insights", "Key insights"],
   ["narrative", "AI narrative"],
   ["forecast", "Forecast"],

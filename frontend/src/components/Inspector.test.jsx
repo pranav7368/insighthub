@@ -141,3 +141,33 @@ describe("Inspector", () => {
     });
   });
 });
+
+describe("Inspector panel size", () => {
+  it("resizes from the keyboard, remembers it, and makes room on the page", async () => {
+    open();
+    const handle = await screen.findByRole("separator", { name: "Resize details panel" });
+    expect(handle).toHaveAttribute("aria-valuenow", "540");
+    handle.focus();
+    await userEvent.keyboard("{ArrowLeft}{ArrowLeft}");
+    expect(handle).toHaveAttribute("aria-valuenow", "620");
+    expect(localStorage.getItem("ih_insp_w")).toBe("620");
+    expect(document.documentElement.style.getPropertyValue("--insp-pad")).toBe("640px");
+    await userEvent.keyboard("{Home}");
+    expect(handle).toHaveAttribute("aria-valuenow", "540");
+  });
+
+  it("expands to a wide two-column view and back", async () => {
+    open();
+    await screen.findByText("₹800");
+    const expand = screen.getByRole("button", { name: "Expand details" });
+    await userEvent.click(expand);
+    expect(expand).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("dialog")).toHaveClass("inspector--wide");
+    // wide overlays the page instead of squeezing it, and has no drag handle
+    expect(screen.queryByRole("separator")).toBeNull();
+    expect(document.documentElement.style.getPropertyValue("--insp-pad")).toBe("0px");
+    expect(localStorage.getItem("ih_insp_wide")).toBe("1");
+    await userEvent.click(expand);
+    expect(screen.getByRole("dialog")).not.toHaveClass("inspector--wide");
+  });
+});

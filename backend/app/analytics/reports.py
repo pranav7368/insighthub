@@ -28,7 +28,7 @@ from ..core.security import new_id
 from .actions import recommend
 from .drill import DrillError
 from .engine import compute_dashboard, get_dataset
-from .intelligence import format_value
+from .intelligence import format_value, human_period
 from .targets import list_targets
 from .variance import explain_variance
 
@@ -183,7 +183,7 @@ def build_report(con, workspace_id, dataset_id, *, measure=None, user_id=None, n
     for k in dash["kpis"]:
         line = f"{_h(k['column']).capitalize()}: {fv(k['column'], k['total'])} in total"
         if k.get("period_label"):
-            line += f"; {fv(k['column'], k['current_period'])} in {k['period_label']}"
+            line += f"; {fv(k['column'], k['current_period'])} in {human_period(k['period_label'])}"
             if k.get("delta_pct") is not None:
                 line += f" ({k['delta_pct']:+.1f}% on the month before)"
         kpis.append(line)

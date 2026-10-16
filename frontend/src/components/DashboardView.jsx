@@ -1,11 +1,10 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
-import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getExplain, getScatter, getTargets, listMetrics, listViews, updateView } from "../api";
+import { createView, deleteView, errorText, exportDatasetCsv, getDashboard, getActions, getExplain, getScatter, getTargets, listMetrics, listViews, updateView } from "../api";
 import { exportPdf, exportPng } from "../export";
 import KpiCard from "./KpiCard";
 import CorrelationHeatmap from "./CorrelationHeatmap";
 import ScatterPlot from "./ScatterChart";
 import TreemapChart from "./TreemapChart";
-import GrowthStrip from "./GrowthStrip";
 import ParetoChart from "./ParetoChart";
 import AiNarrative from "./AiNarrative";
 import InsightsPanel from "./InsightsPanel";
@@ -24,12 +23,17 @@ import ViewsBar from "./ViewsBar";
 import DashSection from "./DashSection";
 import DecompositionTree from "./DecompositionTree";
 import ActionsPanel from "./ActionsPanel";
+import SummaryCard from "./SummaryCard";
+import Icon from "./Icon";
+import Popover from "./Popover";
 import DataMenu from "./DataMenu";
 import { mappableFraction } from "../geo";
 import { moveKey, moveKeyByStep, orderSections, resolveOrder } from "../sections";
 import { buildUrlSearch, makeCtx, readUrlState, targetFor } from "../drill";
 import { buildCommands } from "../palette";
-import { humanLabel } from "../format";
+import { formatDate, formatRange, humanLabel } from "../format";
+import { toast, toastError } from "../toast";
+import { SECTIONS } from "../sections";
 
 // opened on demand, so their code is fetched on first use
 const Inspector = lazy(() => import("./Inspector"));
@@ -58,7 +62,7 @@ function initialFromUrl(datasetId) {
   return owns ? s : null;
 }
 
-export default function DashboardView({ datasetId, canEdit = false, onRequestAlert }) {
+export default function DashboardView({ datasetId, canEdit = false, onRequestAlert, manageActions = [], datasetMeta }) {
   const [fromUrl] = useState(() => initialFromUrl(datasetId));
   const [dashboard, setDashboard] = useState(null);
   const [activeMeasure, setActiveMeasure] = useState(fromUrl?.measure || null);
@@ -80,7 +84,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
   const [pair, setPair] = useState(null);            // user-chosen scatter pair
   const [customScatter, setCustomScatter] = useState(null);
   const [exporting, setExporting] = useState(null);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [nameRequest, setNameRequest] = useState(0);   // "Save as…" from the ⋯ menu
   const [hiddenSections, setHiddenSections] = useState([]);
   const [sectionOrder, setSectionOrder] = useState([]);
   const [arranging, setArranging] = useState(false);
@@ -117,22 +121,34 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
       const v = await createView(datasetId, name, currentConfig(), views.length === 0);
       await reloadViews();
       setActiveViewId(v.view_id);
-    } catch (e) { setError(errorText(e, "Could not save the view.")); }
+      toast(`Saved view “${name}”`);
+    } catch (e) { toastError(errorText(e, "Could not save the view.")); }
   };
   const updateActiveView = async () => {
     if (!activeViewId) return;
-    try { await updateView(activeViewId, { config: currentConfig() }); await reloadViews(); }
-    catch (e) { setError(errorText(e, "Could not update the view.")); }
+    try {
+      await updateView(activeViewId, { config: currentConfig() });
+      await reloadViews();
+      toast(`Updated view “${activeView?.name}”`);
+    } catch (e) { toastError(errorText(e, "Could not update the view.")); }
   };
   const setDefaultActiveView = async () => {
     if (!activeViewId) return;
-    try { await updateView(activeViewId, { is_default: true }); await reloadViews(); }
-    catch (e) { setError(errorText(e, "Could not set the default.")); }
+    try {
+      await updateView(activeViewId, { is_default: true });
+      await reloadViews();
+      toast(`“${activeView?.name}” now opens first for this dataset`);
+    } catch (e) { toastError(errorText(e, "Could not set the default.")); }
   };
   const deleteActiveView = async () => {
     if (!activeViewId) return;
-    try { await deleteView(activeViewId); setActiveViewId(null); await reloadViews(); }
-    catch (e) { setError(errorText(e, "Could not delete the view.")); }
+    const name = activeView?.name;
+    try {
+      await deleteView(activeViewId);
+      setActiveViewId(null);
+      await reloadViews();
+      toast(`Deleted view “${name}”`);
+    } catch (e) { toastError(errorText(e, "Could not delete the view.")); }
   };
   const toggleSection = (key) =>
     setHiddenSections((h) => (h.includes(key) ? h.filter((x) => x !== key) : [...h, key]));
@@ -147,7 +163,13 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
 
   const show = (key) => !hiddenSections.includes(key);
   const activeView = views.find((v) => v.view_id === activeViewId) || null;
-  const viewDirty = activeView ? canonConfig(activeView.config) !== canonConfig(currentConfig()) : false;
+  // A view that does not pin a measure follows whichever one the dashboard
+  // picks, so that choice is not an unsaved change.
+  const viewDirty = activeView
+    ? canonConfig(activeView.config) !== canonConfig({
+      ...currentConfig(), measure: activeView.config?.measure ? activeMeasure : null,
+    })
+    : false;
 
   const runExport = async (kind) => {
     if (!contentRef.current) return;
@@ -156,9 +178,10 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
       const name = dashboard?.dataset?.name || "dashboard";
       if (kind === "png") await exportPng(contentRef.current, name);
       else await exportPdf(contentRef.current, name);
+      toast(`${kind.toUpperCase()} downloaded`);
     } catch {
       // the underlying error is not actionable for the user
-      setError("Export failed. Try again.");
+      toastError("Export failed. Try again.");
     } finally {
       setExporting(null);
     }
@@ -180,6 +203,18 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
     getTargets(datasetId).then(setTargets).catch(() => setTargets([]));
   }, [datasetId, targetsVersion]);
   const targetsChanged = () => setTargetsVersion((v) => v + 1);
+
+  // recommended actions, fetched once: the summary card and the full list share them
+  const [actionsData, setActionsData] = useState(null);
+  const filtersKey = JSON.stringify(filters);
+  useEffect(() => {
+    if (!activeMeasure) return undefined;
+    let live = true;
+    getActions(datasetId, { measure: activeMeasure, filters })
+      .then((d) => { if (live) setActionsData(d); })
+      .catch(() => { if (live) setActionsData({ actions: [] }); });
+    return () => { live = false; };
+  }, [datasetId, activeMeasure, filtersKey, targetsVersion]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // state -> URL
   useEffect(() => {
@@ -251,7 +286,9 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
       if (activeMeasure) params.measure = activeMeasure;
       const data = await getDashboard(datasetId, params);
       setDashboard(data);
-      if (!activeMeasure && data.chosen_measure) setActiveMeasure(data.chosen_measure);
+      // only fill in a measure if nothing has chosen one meanwhile: the saved
+      // default view may have been applied while this request was in flight
+      if (data.chosen_measure) setActiveMeasure((m) => m || data.chosen_measure);
     } catch (err) {
       setError(errorText(err, "Could not load the dashboard."));
     }
@@ -365,6 +402,25 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
   const segmentMenu = (e, dim, value) =>
     sliceMenu(e, { filters: { ...filters, [dim]: String(value) } }, `${humanLabel(dim)}: ${value}`);
 
+  // A certified metric that is exactly a KPI's total ("Revenue = SUM(revenue)")
+  // badges that KPI card instead of repeating the same number in its own card.
+  const certifiedFor = {};
+  for (const m of metrics) {
+    const d = m.definition || {};
+    if (m.kind === "aggregate" && d.agg === "sum" && d.column && !certifiedFor[d.column]) certifiedFor[d.column] = m.name;
+  }
+  const kpiColumns = new Set(dashboard.kpis.map((k) => k.column));
+  const otherMetrics = metrics.filter((m) => !(m.kind === "aggregate" && m.definition?.agg === "sum"
+    && kpiColumns.has(m.definition?.column) && certifiedFor[m.definition.column] === m.name));
+  const seeAllActions = () => {
+    if (hiddenSections.includes("actions")) toggleSection("actions");
+    setTimeout(() => document.getElementById("recommended-actions")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+
+  // A filter combination with no rows would otherwise draw a page of zeros.
+  const noRows = dashboard.row_count_filtered === 0 && (activeFilterCount > 0 || Boolean(dateFrom || dateTo));
+  const clearScope = () => { setFilters({}); setDateFrom(undefined); setDateTo(undefined); };
+
   // Every section, in its natural order. A null node means "this dataset has
   // nothing to show here" — those drop out entirely so arrange mode never
   // offers an empty tile to drag.
@@ -379,6 +435,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
         <div className="kpi-row">
           {dashboard.kpis.map((kpi) => (
             <KpiCard key={kpi.column} kpi={kpi} active={kpi.column === measure}
+              growth={dashboard.growth?.[kpi.column]} certified={certifiedFor[kpi.column]}
               target={targetFor(targets, { measure: kpi.column, filters, date_from: dateFrom, date_to: dateTo })}
               onSelect={() => { setActiveMeasure(kpi.column); openInspect({ measure: kpi.column }); }}
               onContext={(e) => sliceMenu(e, { measure: kpi.column }, humanLabel(kpi.column))} />
@@ -389,11 +446,15 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
     {
       key: "actions",
       node: measure && (
-        <ActionsPanel datasetId={datasetId} measure={measure} filters={filters}
+        <ActionsPanel datasetId={datasetId} measure={measure} filters={filters} data={actionsData}
           refreshKey={targetsVersion} onOpen={(evidence) => openInspect(evidence)} />
       ),
     },
-    { key: "metrics", node: metrics.length > 0 && <CertifiedMetrics metrics={metrics} onInspect={openInspect} /> },
+    {
+      key: "metrics",
+      // aggregates already shown (and badged) on a KPI card are not repeated here
+      node: otherMetrics.length > 0 && <CertifiedMetrics metrics={otherMetrics} onInspect={openInspect} />,
+    },
     {
       key: "drivers",
       // "what changed" compares the whole dataset's latest two months, so its
@@ -404,7 +465,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
       })} onContext={(e, dim, name, ex) => sliceMenu(e, {
         measure: ex.measure, filters: { [dim]: String(name) },
         date_from: ex.current_period, date_to: ex.current_period,
-      }, `${humanLabel(dim)}: ${name} · ${ex.current_period}`)} />,
+      }, `${humanLabel(dim)}: ${name} · ${formatDate(ex.current_period)}`)} />,
     },
     {
       key: "tree",
@@ -413,7 +474,6 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
           filters={filters} dateFrom={dateFrom} dateTo={dateTo} onInspect={openInspect} />
       ),
     },
-    { key: "growth", node: <GrowthStrip growth={dashboard.growth} measure={measure} /> },
     { key: "insights", node: <InsightsPanel insights={dashboard.insights} onInvestigate={investigate} /> },
     { key: "narrative", node: <AiNarrative datasetId={datasetId} /> },
     {
@@ -424,7 +484,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
           forecast={dashboard.forecasts?.[measure]}
           anomalies={dashboard.anomalies?.[measure]}
           onPeriod={(period) => openInspect({ date_from: period, date_to: period })}
-          onContext={(e, period) => sliceMenu(e, { date_from: period, date_to: period }, `${humanLabel(measure)} · ${period}`)}
+          onContext={(e, period) => sliceMenu(e, { date_from: period, date_to: period }, `${humanLabel(measure)} · ${formatDate(period)}`)}
         />
       ),
     },
@@ -513,64 +573,144 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
 
   return (
     <div className={`dash-layout${inspectCtx ? " has-inspector" : ""}`}>
-      <div className={`filter-panel${filtersOpen ? " filter-panel--open" : ""}`}>
-        <FilterBar
-          filterOptions={dashboard.filter_options}
-          activeFilters={filters}
-          onFilterChange={(name, value) =>
-            setFilters((prev) => {
-              const next = { ...prev };
-              if (value) next[name] = value; else delete next[name];
-              return next;
-            })
-          }
-          dateFrom={dateFrom} dateTo={dateTo}
-          onDateFromChange={setDateFrom} onDateToChange={setDateTo}
-          onReset={() => { setFilters({}); setDateFrom(undefined); setDateTo(undefined); }}
-        />
-      </div>
-
       <div className="dash-content" ref={contentRef}>
-        <div className="dash-topline">
-          <div className="dash-topline__title">
-            {dashboard.dataset?.name}
-            <span className="dash-topline__rows">{dashboard.row_count_filtered?.toLocaleString("en-IN")} rows</span>
+        <header className="page-head page-head--dash">
+          <div className="page-head__text">
+            <h1 className="page-head__title">{dashboard.dataset?.name}</h1>
+            <p className="page-head__sub">
+              {dashboard.row_count_filtered?.toLocaleString("en-IN")} rows
+              {datasetMeta && dashboard.row_count_filtered !== datasetMeta.row_count &&
+                ` of ${Number(datasetMeta.row_count).toLocaleString("en-IN")}`}
+              {dashboard.data_profile?.date_span?.to && <> · data up to {formatDate(dashboard.data_profile.date_span.to)}</>}
+            </p>
           </div>
-          <div className="dash-topline__actions" data-tour="views">
-            <button className="palette-btn no-export" onClick={() => setPaletteOpen(true)}
-              aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} title="Find any number, segment or action">
-              <span aria-hidden>⌕</span> Search <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
-            </button>
-            <ViewsBar
-              views={views} activeViewId={activeViewId} dirty={viewDirty}
-              hiddenSections={hiddenSections} arranging={arranging}
-              onApply={applyView} onToggleSection={toggleSection}
-              onSave={saveView} onUpdate={updateActiveView}
-              onDelete={deleteActiveView} onSetDefault={setDefaultActiveView}
-              onToggleArrange={() => setArranging((a) => !a)}
-            />
-            <button className="filters-toggle no-export" onClick={() => setFiltersOpen((o) => !o)}>
-              Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-            </button>
-            <DateRangePresets
-              dateSpan={dashboard.data_profile?.date_span}
-              activeFrom={dateFrom}
-              onApply={(from, to) => { setDateFrom(from); setDateTo(to); }}
-              onClear={() => { setDateFrom(undefined); setDateTo(undefined); }}
-            />
-            <div className="export-btns no-export">
-              <button onClick={() => runExport("pdf")} disabled={exporting}>
-                {exporting === "pdf" ? "…" : "Export PDF"}
-              </button>
-              <button onClick={() => runExport("png")} disabled={exporting}>
-                {exporting === "png" ? "…" : "PNG"}
-              </button>
-              <button onClick={() => exportDatasetCsv(datasetId, dashboard.dataset?.name)}>CSV</button>
-            </div>
-          </div>
+          {manageActions.length > 0 && (
+            <Popover menu align="end" className="no-export" label="Manage" buttonClass="tb-btn"
+              icon={<Icon name="settings" size={16} />}>
+              {() => manageActions.map((a) => (
+                <button key={a.label} role="menuitem" className="menu-item" onClick={a.run}>
+                  <Icon name={a.icon} /> {a.label}
+                </button>
+              ))}
+            </Popover>
+          )}
+        </header>
+
+        <div className="toolbar-row no-export" data-tour="views" role="toolbar" aria-label="Dashboard controls">
+          <ViewsBar
+            views={views} activeViewId={activeViewId} dirty={viewDirty}
+            onApply={applyView} onSave={saveView} onUpdate={updateActiveView} nameRequest={nameRequest}
+          />
+          <DateRangePresets
+            dateSpan={dashboard.data_profile?.date_span}
+            activeFrom={dateFrom}
+            onApply={(from, to) => { setDateFrom(from); setDateTo(to); }}
+            onClear={() => { setDateFrom(undefined); setDateTo(undefined); }}
+          />
+          <Popover align="start" className="filter-pop" title="Filters"
+            icon={<Icon name="filter" size={16} />}
+            label={<>Filter{activeFilterCount > 0 && <span className="tb-count">{activeFilterCount}</span>}</>}>
+            {() => (
+              <FilterBar
+                filterOptions={dashboard.filter_options}
+                activeFilters={filters}
+                onFilterChange={(name, value) =>
+                  setFilters((prev) => {
+                    const next = { ...prev };
+                    if (value) next[name] = value; else delete next[name];
+                    return next;
+                  })
+                }
+                dateFrom={dateFrom} dateTo={dateTo}
+                onDateFromChange={setDateFrom} onDateToChange={setDateTo}
+                onReset={() => { setFilters({}); setDateFrom(undefined); setDateTo(undefined); }}
+              />
+            )}
+          </Popover>
+
+          <div className="toolbar-row__spacer" />
+
+          <button className="tb-btn palette-btn" onClick={() => setPaletteOpen(true)}
+            aria-keyshortcuts={IS_MAC ? "Meta+K" : "Control+K"} title="Find any number, segment or action">
+            <Icon name="search" size={16} /> Search <kbd>{IS_MAC ? "⌘K" : "Ctrl K"}</kbd>
+          </button>
+          <Popover menu align="end" title="More actions" buttonClass="tb-btn tb-btn--icon"
+            icon={<Icon name="more" size={18} />} buttonProps={{ "aria-label": "More actions" }}>
+            {() => (
+              <>
+                <div className="menu-label">This view</div>
+                <button role="menuitem" className="menu-item" onClick={() => setNameRequest((n) => n + 1)}>
+                  <Icon name="plus" /> Save as a new view…
+                </button>
+                {activeView && (
+                  <>
+                    <button role="menuitem" className="menu-item" onClick={setDefaultActiveView} disabled={activeView.is_default}>
+                      <Icon name="layout" /> {activeView.is_default ? "Default view ★" : "Open this dataset on this view"}
+                    </button>
+                    <button role="menuitem" className="menu-item menu-item--danger" onClick={deleteActiveView}>
+                      <Icon name="close" /> Delete this view
+                    </button>
+                  </>
+                )}
+                <button role="menuitem" className="menu-item" onClick={() => setArranging((a) => !a)}>
+                  <Icon name="layout" /> {arranging ? "Finish arranging" : "Arrange sections"}
+                </button>
+                <div className="menu-sep" role="separator" />
+                <div className="menu-label">Show sections</div>
+                <div className="menu-checks">
+                  {SECTIONS.map(([key, label]) => (
+                    <button key={key} role="menuitemcheckbox" aria-checked={!hiddenSections.includes(key)}
+                      className="menu-item menu-item--check" onClick={() => toggleSection(key)}>
+                      <span className="menu-check" aria-hidden>{hiddenSections.includes(key) ? "" : "✓"}</span> {label}
+                    </button>
+                  ))}
+                </div>
+                <div className="menu-sep" role="separator" />
+                <div className="menu-label">Export</div>
+                <button role="menuitem" className="menu-item" onClick={() => runExport("pdf")} disabled={Boolean(exporting)}>
+                  <Icon name="download" /> PDF
+                </button>
+                <button role="menuitem" className="menu-item" onClick={() => runExport("png")} disabled={Boolean(exporting)}>
+                  <Icon name="download" /> PNG image
+                </button>
+                <button role="menuitem" className="menu-item" onClick={() => exportDatasetCsv(datasetId, dashboard.dataset?.name)}>
+                  <Icon name="download" /> Data as CSV
+                </button>
+              </>
+            )}
+          </Popover>
         </div>
 
-        <FilterChips filters={filters} onRemove={removeFilter} onClearAll={() => setFilters({})} />
+        {(Object.keys(filters).length > 0 || dateFrom || dateTo) && (
+          <div className="active-scope no-export">
+            {(dateFrom || dateTo) && (
+              <button className="chip" onClick={() => { setDateFrom(undefined); setDateTo(undefined); }}
+                title="Remove the date range">
+                <Icon name="calendar" size={14} /> {formatRange(dateFrom, dateTo)} <span className="chip__x">×</span>
+              </button>
+            )}
+            <FilterChips filters={filters} onRemove={removeFilter} onClearAll={() => setFilters({})} />
+          </div>
+        )}
+        {exporting && <div className="export-busy no-export" role="status">Preparing {exporting.toUpperCase()}…</div>}
+
+        {noRows && (
+          <div className="empty-state empty-state--inline" role="status">
+            <h2>No rows match this view</h2>
+            <p>
+              The filters and date range together leave nothing to count. Widen or clear them to see the numbers again.
+            </p>
+            <button className="views-btn views-btn--accent" onClick={clearScope}>Clear filters and dates</button>
+          </div>
+        )}
+
+        {/* pinned first, outside the arrangeable sections: it is the page's answer */}
+        {!noRows && show("summary") && measure && (
+          <SummaryCard datasetId={datasetId} measure={measure} subtype={subtypeOf(measure)}
+            filters={filters} dateFrom={dateFrom} dateTo={dateTo}
+            target={targetFor(targets, { measure, filters, date_from: dateFrom, date_to: dateTo })}
+            actions={actionsData?.actions} onOpen={openInspect} onSeeActions={seeAllActions} />
+        )}
 
         {arranging && (
           <div className="arrange-hint no-export">
@@ -580,7 +720,7 @@ export default function DashboardView({ datasetId, canEdit = false, onRequestAle
           </div>
         )}
 
-        {visible.map(({ key, node }, i) => (
+        {!noRows && visible.map(({ key, node }, i) => (
           <DashSection
             key={key} sectionKey={key} arranging={arranging}
             isFirst={i === 0} isLast={i === visible.length - 1}

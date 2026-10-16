@@ -212,3 +212,17 @@ def test_endpoints_and_row_rules(client):
                        params={"measure": "revenue", "filters": json.dumps({"region": "North"})},
                        headers=auth(viewer)).json()
     assert north["delta"] == 0 and north["a"]["value"] == 0
+
+
+def test_summary_explains_a_driver_bigger_than_the_whole_change(con):
+    """North -300, South +250: the total fell 50 but North alone fell 300.
+    "600% of the move" is correct arithmetic and confusing prose."""
+    con.execute("INSERT INTO workspaces (workspace_id, name) VALUES ('ws_a', 'A')")
+    rows = [["date", "region", "revenue"],
+            ["2025-01-05", "North", "400"], ["2025-01-06", "South", "100"],
+            ["2025-02-05", "North", "100"], ["2025-02-06", "South", "350"]]
+    dsid = ingest_upload(con, "ws_a", "o.csv", _csv(rows)).dataset_id
+    s = explain_variance(con, "ws_a", dsid, measure="revenue", dimension="region")["summary"]
+    assert "% of the move" not in s
+    assert "North alone moved −₹300, more than the whole change" in s
+    assert "other region values rose and offset part of it" in s

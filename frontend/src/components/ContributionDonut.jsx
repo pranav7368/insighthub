@@ -31,7 +31,7 @@ export default function ContributionDonut({ dimensionName, breakdown, subtype, o
     }}>
       <div className="chart-card__title">
         Contribution by {humanLabel(dimensionName)}
-        <span className="chart-card__tag">click a slice for details</span>
+        <span className="chart-card__tag chart-card__hint">click a slice for details</span>
       </div>
       <ResponsiveContainer width="100%" height={240}>
         <PieChart>

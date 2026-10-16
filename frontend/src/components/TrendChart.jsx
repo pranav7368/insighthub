@@ -1,13 +1,13 @@
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { formatNumber, humanLabel } from "../format";
+import { formatDate, formatNumber, formatTick, humanLabel } from "../format";
 
 function ChartTooltip({ active, payload, label, subtype }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="chart-tooltip">
-      <div className="chart-tooltip__label">{label}</div>
+      <div className="chart-tooltip__label">{formatDate(label)}</div>
       <div className="chart-tooltip__value">{formatNumber(payload[0].value, subtype)}</div>
     </div>
   );
@@ -23,7 +23,7 @@ export default function TrendChart({ data, measure, subtype }) {
       <ResponsiveContainer width="100%" height={280}>
         <LineChart data={data} margin={{ top: 8, right: 16, left: 8, bottom: 0 }}>
           <CartesianGrid stroke="var(--gridline)" vertical={false} />
-          <XAxis dataKey="period" stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 12 }} tickLine={false} />
+          <XAxis dataKey="period" tickFormatter={formatTick} stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 12 }} tickLine={false} />
           <YAxis stroke="var(--baseline)" tick={{ fill: "var(--text-muted)", fontSize: 12 }} tickLine={false}
             axisLine={false} tickFormatter={(v) => formatNumber(v, subtype)} width={72} />
           <Tooltip content={<ChartTooltip subtype={subtype} />} cursor={{ stroke: "var(--baseline)" }} />
