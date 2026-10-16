@@ -6,8 +6,10 @@ tenant isolation: downstream code receives a workspace_id it can trust.
 
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
+from ..core import apikeys
 from ..core.security import TokenError, decode_access_token
 
 
@@ -19,12 +21,29 @@ class Principal:
     # False when the workspace requires a second factor this member has not
     # enrolled. They are authenticated, but may only reach MFA setup.
     mfa_satisfied: bool = True
+    # set when the caller is an API key rather than a signed-in person
+    key_id: str | None = None
 
 
-def _resolve(authorization: str) -> Principal:
+def _resolve_key(token: str, path: str | None, allow_keys: bool) -> Principal:
+    if not allow_keys or not apikeys.path_allowed(path):
+        raise HTTPException(status_code=403, detail="API keys can only call the data API — "
+                                                    "sign in to manage accounts, team, billing or privacy")
+    from ..core import db
+
+    found = apikeys.authenticate(db.connect(), token)
+    if found is None:
+        raise HTTPException(status_code=401, detail="invalid, expired or revoked API key")
+    return Principal(user_id=found["user_id"], workspace_id=found["workspace_id"], role=found["role"],
+                     key_id=found["key_id"])
+
+
+def _resolve(authorization: str, path: str | None = None, allow_keys: bool = False) -> Principal:
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="missing bearer token")
     token = authorization[len("Bearer ") :].strip()
+    if apikeys.looks_like_key(token):
+        return _resolve_key(token, path, allow_keys)
     try:
         payload = decode_access_token(token)
     except TokenError as exc:
@@ -56,15 +75,20 @@ def _resolve(authorization: str) -> Principal:
     )
 
 
-def get_principal(authorization: str = Header(default="")) -> Principal:
+async def get_principal(request: Request, authorization: str = Header(default="")) -> Principal:
     """The dependency for every endpoint that is not MFA enrolment.
 
     Enforcing the workspace's MFA requirement HERE rather than per-endpoint is
     deliberate: a new endpoint is covered by default instead of by someone
     remembering to add a check, which is the same reason row-level security has
     a single choke point.
+
+    It is async only so that `apikeys.current_key` is set in the request's own
+    context, which the (threadpool) endpoint then inherits; the lookup itself
+    still runs off the event loop.
     """
-    principal = _resolve(authorization)
+    principal = await run_in_threadpool(_resolve, authorization, request.url.path, True)
+    apikeys.current_key.set(principal.key_id)
     if not principal.mfa_satisfied:
         raise HTTPException(
             status_code=403,

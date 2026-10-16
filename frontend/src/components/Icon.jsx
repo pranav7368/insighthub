@@ -32,6 +32,7 @@ const PATHS = {
   layout: "M4 4h16v16H4zM4 10h16M10 10v10",
   calendar: "M4 6h16v14H4zM4 10h16M8 3v4M16 3v4",
   expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7",
+  key: "M15 9a3 3 0 1 0 0 .01M13 11l-9 9M7 17l2 2M10 14l2 2",
   shrink: "M4 14h6v6M20 10h-6V4M14 10l7-7M10 14l-7 7",
 };
 

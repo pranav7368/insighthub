@@ -197,6 +197,22 @@ MIGRATIONS: tuple[Migration, ...] = (
     created_at      TIMESTAMP DEFAULT current_timestamp
 )""",),
     ),
+    Migration(
+        id="0011_api_keys",
+        description="hashed, revocable API keys for the data API",
+        statements=("""CREATE TABLE IF NOT EXISTS api_keys (
+    key_id       VARCHAR PRIMARY KEY,
+    workspace_id VARCHAR NOT NULL,
+    created_by   VARCHAR NOT NULL,      -- the admin it acts as (row rules, role cap)
+    name         VARCHAR NOT NULL,
+    role         VARCHAR NOT NULL,      -- viewer | editor (never admin)
+    secret_hash  VARCHAR NOT NULL,      -- SHA-256 of the secret; the key itself is never stored
+    created_at   TIMESTAMP,
+    last_used_at TIMESTAMP,
+    expires_at   TIMESTAMP,
+    revoked_at   TIMESTAMP
+)""",),
+    ),
 )
 
 

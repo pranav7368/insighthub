@@ -45,11 +45,22 @@ def _ws_slug(workspace_id: str) -> str:
     return re.sub(r"[^A-Za-z0-9]+", "", workspace_id)[:16] or "ws"
 
 
+def _read_excel(content: bytes) -> pd.DataFrame:
+    """calamine (Rust) reads workbooks ~6x faster than openpyxl and yields the
+    same frame; at the 50 MB upload limit that is the difference between a few
+    seconds and a request that outlives the proxy. openpyxl stays as the
+    fallback for a workbook calamine cannot read, or an install without it."""
+    try:
+        return pd.read_excel(io.BytesIO(content), engine="calamine")
+    except Exception:   # noqa: BLE001 — not installed, or cannot read it: let openpyxl decide
+        return pd.read_excel(io.BytesIO(content), engine="openpyxl")
+
+
 def _read_structured(filename: str, content: bytes) -> pd.DataFrame:
     suffix = Path(filename).suffix.lower()
     if suffix == ".csv":
         return pd.read_csv(io.BytesIO(content))
-    return pd.read_excel(io.BytesIO(content))
+    return _read_excel(content)
 
 
 def _dedupe_columns(names: list[str]) -> list[str]:

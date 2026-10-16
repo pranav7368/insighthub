@@ -28,6 +28,7 @@ with no rules on a dataset sees all of it — absence of a rule is not a denial.
 
 import json
 
+from ..core import apikeys
 from ..core.security import new_id
 from ..core.sqlsafe import UnsafeIdentifierError, safe_identifier, safe_table_name
 from .engine import get_columns, get_dataset
@@ -167,6 +168,8 @@ def build_predicate(con, workspace_id: str, user_id: str | None,
 def _is_admin(con, workspace_id: str, user_id: str | None) -> bool:
     """Admins see unmasked values. Looked up here rather than threaded through
     every caller: a read path cannot accidentally omit the role and unmask."""
+    if apikeys.current_key.get():
+        return False         # API keys never see raw PII, whoever created them
     if not user_id:
         return True          # system/internal callers (no member context)
     row = con.execute("SELECT role FROM users WHERE user_id = ? AND workspace_id = ?",

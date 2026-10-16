@@ -39,7 +39,7 @@ _KNOWN_WORKSPACE_TABLES = (
     "datasets", "dataset_columns", "chunks", "chunk_embeddings", "audit_log",
     "ingest_batches", "row_archive", "data_sources", "dashboard_views",
     "share_links", "alerts", "metrics", "subscriptions", "dataset_relations",
-    "rls_rules", "column_policies", "targets", "report_schedules", "users",
+    "rls_rules", "column_policies", "targets", "report_schedules", "api_keys", "users",
 )
 
 
@@ -141,6 +141,13 @@ def export_workspace(con, workspace_id: str) -> dict:
                 "SELECT user_id, email, role, created_at FROM users WHERE workspace_id = ?",
                 [workspace_id],
             )   # never export password hashes
+        elif table == "api_keys":
+            rows = _rows_as_dicts(
+                con,
+                """SELECT key_id, name, role, created_by, created_at, last_used_at, expires_at, revoked_at
+                   FROM api_keys WHERE workspace_id = ?""",
+                [workspace_id],
+            )   # nor key hashes
         else:
             rows = _rows_as_dicts(con, f"SELECT * FROM {table} WHERE workspace_id = ?",
                                   [workspace_id])
@@ -166,6 +173,9 @@ def erase_member(con, workspace_id: str, user_id: str) -> dict:
         raise DataRightsError("no such member in this workspace")
 
     con.execute("DELETE FROM rls_rules WHERE workspace_id = ? AND user_id = ?",
+                [workspace_id, user_id])
+    # a key acts as its creator; with the creator gone it must not keep working
+    con.execute("DELETE FROM api_keys WHERE workspace_id = ? AND created_by = ?",
                 [workspace_id, user_id])
     con.execute("UPDATE share_links SET created_by = NULL WHERE workspace_id = ? AND created_by = ?",
                 [workspace_id, user_id])
