@@ -14,13 +14,14 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 
 | Control | How it works | Where |
 |---|---|---|
-| **Tenant isolation** | `workspace_id` comes from the verified JWT and is never accepted from client input; every query is scoped by it | `api/deps.py` |
+| **Tenant isolation** | `workspace_id` comes from the verified JWT (or the verified API key) and is never accepted from client input; every query is scoped by it | `api/deps.py` |
 | **SQL injection defence** | Identifiers are whitelisted against the dataset's real columns and quoted; values are always bound parameters. No user text is ever formatted into SQL | `core/sqlsafe.py` |
 | **Row-level security** | Per-member row rules rewrite the table reference into a filtered subquery shared by every read path; fails closed if a rule's column disappears | `analytics/rls.py` |
 | **PII masking** | Sensitive columns detected on upload by name and value shape, redacted in the SQL projection for everyone except signed-in admins; source data never altered. **Public share links are always masked**, including links an admin created | `analytics/privacy.py`, `analytics/rls.py` |
 | **Share links** | Unguessable 192-bit capability token per dashboard; revocable, optional expiry. Read-only, evaluated under the link author's row rules, always PII-masked. Visitors can drill into aggregates but only *within* what was shared (pinned filters cannot be changed, dates are clamped); raw rows, CSV export and free-form questions are never available publicly | `analytics/sharing.py` |
 | **Email reports** | Scheduled summaries leave the system, so they are built like a share link: under the creator's row rules, always PII-masked, aggregates only (no rows). One message per recipient (no shared To: list); recipients validated and capped at 20; an erased member's address is removed from every report. Delivered over the operator's SMTP (`IH_SMTP_*`, STARTTLS by default) | `analytics/reports.py` |
 | **RBAC** | admin / editor / viewer; content mutations require editor, user and policy management require admin | `api/deps.py` |
+| **API keys** | Created by admins, shown once, stored as a SHA-256 of a 256-bit secret; revocable, optional expiry, last-use recorded, creation and revocation audited. A key is capped at editor, can only reach data endpoints (never auth, MFA, team, billing, privacy or key management), acts under its creator's row rules and current role, dies with its creator, and **always sees PII masked** | `core/apikeys.py`, `api/deps.py` |
 | **Password policy** | NIST SP 800-63B style: length, breach-corpus blocklist, no account-derived or sequential passwords | `core/passwords.py` |
 | **Session revocation** | `token_epoch` per user; bumped on password change, role change, and "sign out everywhere" | `core/security.py` |
 | **Login lockout** | Per account (not just per IP), 8 failures → 15 minutes; identical 401 for every failure so account existence is not disclosed | `main.py` |
@@ -36,7 +37,7 @@ Anyone claiming otherwise in a sales conversation is creating a liability.
 | **Backup & restore** | `scripts/backup.py` archives every table to Parquet with a manifest, verifies an archive without restoring it, and refuses an archive from a newer build. The **restore is tested on every CI run** — real data in, wiped, restored, same dashboard number out | `core/backup.py` |
 | **Accessibility** | WCAG 2.1 AA: zero axe-core violations across login, dashboard, tour and every admin dialog, in light and dark. Structural rules regression-tested in CI | `frontend/src/a11y.test.jsx` |
 
-Verified by **501 backend tests** and **76 frontend tests**, including a source-guard test that fails
+Verified by **606 backend tests** and **167 frontend tests**, including a source-guard test that fails
 if any module queries a dataset table without going through the row-level
 security rewrite.
 

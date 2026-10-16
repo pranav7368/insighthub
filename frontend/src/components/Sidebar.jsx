@@ -10,7 +10,7 @@ import Popover from "./Popover";
  */
 export default function Sidebar({
   tab, onTab, datasets, datasetId, onChooseDataset, canEdit, isAdmin,
-  onUpload, onConnect, onTemplates, onTeam, onBilling, onSecurity, onTour, onLogout,
+  onUpload, onConnect, onTemplates, onTeam, onBilling, onApiKeys, onSecurity, onTour, onLogout,
   theme, onTheme, collapsed, onToggleCollapsed, mobileOpen, onCloseMobile, uploading,
 }) {
   const fileRef = useRef(null);
@@ -101,6 +101,9 @@ export default function Sidebar({
             <>
               <button className="side-item" onClick={go(onTeam)} title="Team"><Icon name="team" /><span className="side-item__label">Team</span></button>
               <button className="side-item" onClick={go(onBilling)} title="Billing"><Icon name="billing" /><span className="side-item__label">Billing</span></button>
+              {onApiKeys && (
+                <button className="side-item" onClick={go(onApiKeys)} title="API keys"><Icon name="key" /><span className="side-item__label">API keys</span></button>
+              )}
             </>
           )}
           <Popover menu align="up" className="side-account" buttonClass="side-item"

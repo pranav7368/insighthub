@@ -311,3 +311,43 @@ body.is-resizing .inspector { transition: none; }
 }
 .empty-state--inline h2 { margin: 0; font-size: 18px; color: var(--text-primary); }
 .empty-state--inline p { margin: 0 0 6px; max-width: 460px; line-height: 1.5; }
+
+/* ===== API keys ===== */
+.key-reveal {
+  margin: 4px 0 16px; padding: 14px 16px; border-radius: var(--radius-sm);
+  border: 1px solid color-mix(in srgb, var(--success-text) 45%, var(--border));
+  background: color-mix(in srgb, var(--success-text) 7%, var(--surface-1));
+  display: flex; flex-direction: column; gap: 10px; align-items: flex-start;
+}
+.key-reveal__title { font-weight: 600; font-size: 14px; }
+.key-reveal__row { display: flex; gap: 8px; width: 100%; align-items: center; }
+.key-reveal__row input {
+  flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface-1); color: var(--text-primary);
+}
+.key-reveal__curl {
+  flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap; font-size: 12px; padding: 8px 10px;
+  border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-secondary);
+}
+.key-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.key-table th { text-align: left; font-size: 11.5px; font-weight: 600; color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.key-table td { padding: 10px 8px; border-bottom: 1px solid var(--gridline); vertical-align: top; }
+.key-table code { font-size: 12px; color: var(--text-secondary); }
+.key-table__by { font-size: 12px; color: var(--text-muted); }
+.src-row-actions .src-remove.is-confirming {
+  background: var(--status-critical); color: #fff !important; border-color: var(--status-critical);
+}
+.key-table td.src-row-actions { display: table-cell; text-align: right; }
+@media (max-width: 760px) {
+  .key-table thead { display: none; }
+  .key-table tr { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 0; border-bottom: 1px solid var(--gridline); }
+  .key-table td { border: 0; padding: 0; }
+  .key-table td:nth-child(n+3):not(:last-child) { display: none; }
+  .key-reveal__row { flex-wrap: wrap; }
+  .key-table td.src-row-actions { display: block; }
+  /* stacked forms: a grow basis would become a 180px *height* in a column */
+  .src-form > .src-field { flex: 0 0 auto; width: 100%; }
+  .src-form > .src-field--action { align-self: stretch; }
+  .src-form > .src-field--action .src-connect { width: 100%; }
+}

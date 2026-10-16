@@ -360,6 +360,11 @@ export const setPrivacy = (datasetId, body) =>
 // --- Team members & roles ---
 export const listMembers = () => client.get("/members").then((r) => r.data);
 
+// API keys (admin): the plain key is only in createApiKey's response
+export const listApiKeys = () => client.get("/api-keys").then((r) => r.data);
+export const createApiKey = (body) => client.post("/api-keys", body).then((r) => r.data);
+export const revokeApiKey = (keyId) => client.delete(`/api-keys/${keyId}`).then((r) => r.data);
+
 export const addMember = (email, role, password) =>
   client.post("/members", { email, role, password: password || null }).then((r) => r.data);
 

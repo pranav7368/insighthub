@@ -23,6 +23,7 @@ const ReportsDialog = lazy(() => import("./components/ReportsDialog"));
 const MetricsDialog = lazy(() => import("./components/MetricsDialog"));
 const JoinDialog = lazy(() => import("./components/JoinDialog"));
 const TeamDialog = lazy(() => import("./components/TeamDialog"));
+const ApiKeysDialog = lazy(() => import("./components/ApiKeysDialog"));
 const BillingDialog = lazy(() => import("./components/BillingDialog"));
 const SchemaReview = lazy(() => import("./components/SchemaReview"));
 const DataQuality = lazy(() => import("./components/DataQuality"));
@@ -55,6 +56,7 @@ export default function App() {
   const [showTemplates, setShowTemplates] = useState(false);
   const [showAccess, setShowAccess] = useState(false);
   const [showSecurity, setShowSecurity] = useState(false);
+  const [showApiKeys, setShowApiKeys] = useState(false);
   const [showShare, setShowShare] = useState(false);
   const [showAlerts, setShowAlerts] = useState(false);
   const [showReports, setShowReports] = useState(false);
@@ -200,6 +202,7 @@ export default function App() {
         canEdit={canEdit} isAdmin={isAdmin} uploading={uploading}
         onUpload={uploadFromSidebar} onConnect={() => setShowConnect(true)} onTemplates={() => setShowTemplates(true)}
         onTeam={() => setShowTeam(true)} onBilling={() => setShowBilling(true)}
+        onApiKeys={() => setShowApiKeys(true)}
         onSecurity={() => setShowSecurity(true)} onTour={() => setTourOn(true)} onLogout={logout}
         theme={theme} onTheme={setTheme}
         collapsed={collapsed} onToggleCollapsed={toggleCollapsed}
@@ -317,6 +320,7 @@ export default function App() {
         />
       )}
       {showTeam && <TeamDialog onClose={() => setShowTeam(false)} />}
+      {showApiKeys && <ApiKeysDialog onClose={() => setShowApiKeys(false)} />}
       {showBilling && <BillingDialog onClose={() => setShowBilling(false)} />}
       {showSchema && (
         <SchemaReview columns={schemaCols} onOverride={handleOverride} onClose={() => setShowSchema(false)} />

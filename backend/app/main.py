@@ -67,7 +67,7 @@ from .members import (
 )
 from .billing import BillingError, QuotaError, check_quota, entitlements, set_plan
 from . import billing_stripe
-from .core import config, db, mfa, observability, passwords, retention
+from .core import apikeys, config, db, mfa, observability, passwords, retention
 from .core.datarights import (
     DataRightsError, as_download, erase_member, erase_workspace,
     export_member, export_workspace,
@@ -1566,6 +1566,40 @@ def remove_report(report_id: str, principal: Principal = Depends(require_editor)
     if not delete_report(con, principal.workspace_id, report_id):
         raise HTTPException(status_code=404, detail="report not found")
     db.audit(con, principal.workspace_id, principal.user_id, "report_delete", report_id)
+    return {"ok": True}
+
+
+# ----------------------------------------------------------- api keys ----
+
+class ApiKeyBody(BaseModel):
+    name: str
+    role: str = "viewer"
+    expires_in_days: int | None = None
+
+
+@app.get("/api/api-keys")
+def get_api_keys(principal: Principal = Depends(require_admin)):
+    return apikeys.list_keys(db.connect(), principal.workspace_id)
+
+
+@app.post("/api/api-keys")
+def add_api_key(body: ApiKeyBody, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    try:
+        key = apikeys.create_key(con, principal.workspace_id, principal.user_id, name=body.name,
+                                 role=body.role, expires_in_days=body.expires_in_days)
+    except apikeys.ApiKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.audit(con, principal.workspace_id, principal.user_id, "api_key_create", f"{key['key_id']} {key['role']}")
+    return key
+
+
+@app.delete("/api/api-keys/{key_id}")
+def remove_api_key(key_id: str, principal: Principal = Depends(require_admin)):
+    con = db.connect()
+    if not apikeys.revoke_key(con, principal.workspace_id, key_id):
+        raise HTTPException(status_code=404, detail="key not found")
+    db.audit(con, principal.workspace_id, principal.user_id, "api_key_revoke", key_id)
     return {"ok": True}
 
 
