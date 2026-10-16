@@ -6,6 +6,10 @@ import { formatNumber, humanLabel } from "../format";
 const W = 380, H = 430;
 const project = makeProjection(INDIA_BBOX, W, H);
 
+// India's official boundary (incl. PoK, Gilgit-Baltistan and Aksai Chin), from
+// Natural Earth's India point-of-view countries file — public domain.
+// src/indiaMap.test.js pins the territories it must include.
+
 // Build SVG path strings for the country outline (Polygon or MultiPolygon).
 function outlinePaths() {
   const feat = indiaGeo.features?.[0];
@@ -52,8 +56,11 @@ export default function MapChart({ dimensionName, breakdown, measure, subtype })
                 <circle cx={x} cy={y} r={r} fill="var(--series-1)" fillOpacity={active ? 0.85 : 0.55}
                   stroke="var(--surface-1)" strokeWidth={1.5} />
                 {r > 13 && (
+                  // names are often wider than their bubble: theme text with a
+                  // halo stays readable over the bubble, the land and the sea
                   <text x={x} y={y + 3} textAnchor="middle" fontSize={10} fontWeight="600"
-                    fill="#fff" style={{ pointerEvents: "none" }}>{d.name}</text>
+                    fill="var(--text-primary)" stroke="var(--surface-1)" strokeWidth={3}
+                    strokeLinejoin="round" paintOrder="stroke" style={{ pointerEvents: "none" }}>{d.name}</text>
                 )}
               </g>
             );

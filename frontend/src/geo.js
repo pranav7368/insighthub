@@ -31,6 +31,11 @@ const PLACES = {
   assam: [92.94, 26.20], jharkhand: [85.28, 23.61], chhattisgarh: [81.87, 21.28],
   uttarakhand: [79.02, 30.07], "himachal pradesh": [77.17, 31.10], goa_state: [74.12, 15.30],
   "jammu and kashmir": [76.00, 34.20], "jammu & kashmir": [76.00, 34.20], ladakh: [77.50, 34.50],
+  "arunachal pradesh": [94.73, 28.22], sikkim: [88.51, 27.53], meghalaya: [91.37, 25.47],
+  manipur: [93.91, 24.66], mizoram: [92.94, 23.16], nagaland: [94.56, 26.16], tripura: [91.99, 23.94],
+  "andaman and nicobar islands": [92.66, 11.74], "andaman & nicobar islands": [92.66, 11.74],
+  "andaman and nicobar": [92.66, 11.74], lakshadweep: [72.64, 10.57],
+  puducherry: [79.81, 11.94], pondicherry: [79.81, 11.94],
 };
 
 export function coordFor(name) {
